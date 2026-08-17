@@ -1,7 +1,7 @@
 ---
 name: vrc-monitor-agent
 description: "Use for VRChat friend queries (online status, who played with whom, activity timelines, online patterns) and VRChat social actions (boop, invite, join world, friend management, group operations, image uploads) via the vrc-monitor MCP server on port 8799."
-version: 1.1.0
+version: 2.0.0
 metadata:
   hermes:
     tags: [vrchat, gaming, social, mcp, monitoring]
@@ -21,7 +21,7 @@ metadata:
 
 | 工具 | 说明 |
 |------|------|
-| `get_online_friends` | 当前在线好友列表（含昵称 nickname + 房型解析 locationParsed：worldId/instanceId/type/ownerId/region） |
+| `get_online_friends` | 当前在线好友列表（含昵称 nickname + 房型解析 locationParsed：worldId/instanceId/type/ownerId/region + 世界名 worldName（未缓存自动 API 补查）+ 房间停留时长 durationMinutes/enteredAt + **在线时长 onlineMinutes/onlineSince**；durationMinutes 进入时间 = max(会话起点, 最新位置事件)防跨会话污染；onlineMinutes = 最近 friend-offline 之后最早 friend-online 起算，重复推送被 MIN 跳过） |
 | `get_friend_info` | 好友详细信息 |
 | `search_users` | 按名字搜索用户（API 优先；API 无匹配时自动回退本地好友库模糊搜索 display_name/备注，结果带 `source: local_friends` 标记） |
 | `search_groups` | 按名字搜索群组（API 用 query 参数，不是 search） |
@@ -43,10 +43,13 @@ metadata:
 | `set_world_note` | 世界用户备注写入/更新（本地存储，API 刷新不覆盖；空串清除） |
 | `get_world_history` | 世界信息变更历史（name/description/author/image_url/release_status/capacity/tags 字段级记录） |
 | `get_weekly_report` | 一周游戏周报（活跃天数/时长/世界 Top/同屏伙伴带昵称/自己的上线规律/群组活动/圈内活动日历；days 默认 7） |
-| `scan_new_worlds` | 扫描最近 N 天新世界（1-30，默认 7），过滤测试/垃圾图后写入 new_worlds 表，按热度推荐 TOP10；dryRun 只看不写 |
+| `scan_new_worlds` | 扫描最近 N 天新世界（1-30，默认 7），过滤测试/垃圾图后写入 world_kb 表（原 new_worlds），按热度推荐 TOP10；dryRun 只看不写 |
 | `get_new_worlds` | 只读查询已跟踪新世界：onlyUnvisited 只看未逛过、sortBy（favorites/occupants/popularity/created_at）、excludeTheme 排除主题（按 author_tag_* 逗号分隔，SQL 层排除）、limit（默认 10 最大 50） |
-| `rate_world` | **用户反馈**：给世界打好评/烂图标记（rating: 1=好图加权 / -1=烂图降权 / 0=清除），写入 new_worlds.user_rating，影响 worldScore 推荐排序 |
+| `rate_world` | **用户反馈**：给世界打好评/烂图标记（rating: 1=好图加权 / -1=烂图降权 / 0=清除），写入 world_kb.user_rating，影响 worldScore 推荐排序 |
 | `mark_world_visited` | **显式确认逛过**某世界（事件驱动 visited 会漏记，开图闭环手动确认用） |
+| `add_to_backlog` | **加入待逛列表**（本地待办，不动云端收藏）：worldId 必填，reason/priority（0-2，默认 0）可选。幂等：重复加入更新备注/优先级，加入时间保持首次。状态存 world_kb.backlog（合表方案） |
+| `get_backlog` | **查看待逛列表**：status（pending 默认=未逛 / visited=逛完历史 / all）、sortBy（added_at 默认 / priority / favorites）、limit（1-50）。**逛完自动从未逛区消失**（pending 按 visited 过滤），记录保留在 visited 历史 |
+| `remove_from_backlog` | **移出待逛列表**：worldId 必填。只清 backlog 标记（保留行/世界知识），幂等 |
 | `recommend_worlds` | **多源融合世界推荐**：local 新世界池 × PlanetVRC × 官方主题搜索 × 用户反馈，评分（热度+新鲜度+主题+作者画像 30 天窗口熟客）+ 可解释 reasons；theme/excludeTheme/sources/excludeVisited 参数 |
 | `favorite_world` | **云端收藏**：加入 VRChat 收藏夹分组（worlds0-4，默认 worlds0），写操作需确认，成功后本地 favorited=1 供推荐加权 |
 | `get_nicknames` / `set_nickname` | 好友昵称映射（查询/写入，本地库） |
@@ -103,90 +106,18 @@ curl -s http://127.0.0.1:8799/mcp -X POST \
 
 响应是 SSE 格式，取 `data:` 行，解析 `result.content[0].text` 为 JSON。
 
-## 核心查询工作流
+## 核心查询工作流 → 已按对象域拆分
 
-### 1. "XX 现在和谁一起？" / 同实例好友
+> **2026-08-16 起查询工作流按域拆分**（本总纲保留工具表唯一权威 + 通用陷阱）：
 
-```
-1. get_friend_info(userId=目标) → 取 location 字段（如 "wrld_xxx:77182~hidden(usr_owner)~region(jp)"）
-2. get_online_friends() → 所有在线好友的位置
-3. 按完整 location 字符串匹配 → 同实例的好友
-4. 从 location 解析 owner：hidden(usr_xxx)/private(usr_xxx)/friends(usr_xxx)/group(grp_xxx)
-5. get_world_name(worldId) → 世界名（location.split(':')[0]）
-```
+| 域 | 工作流 | 见 |
+|----|--------|-----|
+| 好友/社交 | 在线五要素/同房/同屏/时间线/上线规律/常玩/昵称/画像/关系 + 全部写操作（boop/上传/邀请/开房/好友管理） | **vrchat-social-queries** |
+| 群组 | 群组查询/公告 403 分诊/join/leave/peek | **vrchat-group-queries** |
+| 世界 | 挑新世界/backlog/推荐/PlanetVRC/情报挖掘/X 博主 + 地图展示格式 | **vrchat-world-queries** |
+| BOOTH | 素体服装检索/热度榜/封面/汉化 | **booth-query-display** |
 
-- 只能看到你也是好友的人（API 限制）
-- `~hidden(usr_A)` = A 的隐藏房；`~private(usr_B)` = B 的私密房；`~friends(usr_C)` = C 的好友房
-
-### 2. "XX 今天/某天和谁一起玩过？" → `get_companions`
-
-**不要委派子 agent 做同屏查询**——子 agent 只会查少量已知 userId，会漏掉其他人。直接用 MCP 工具：
-
-```bash
-curl -s http://127.0.0.1:8799/mcp -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_companions","arguments":{"startTime":"2026-08-01T11:00:00Z","endTime":"2026-08-01T17:00:00Z","userId":"<目标userId>"}}}'
-```
-
-- `startTime`/`endTime`：ISO 8601 UTC（北京时间 -8h），窗口 ≤24h
-- `userId`：**可查自己（默认，即登录账号）或任意好友**——传好友 ID = "XX 和谁一起玩过"
-- 原理：查目标用户的 location 事件 → 提取 worldId:instanceId → 全量比对好友 location 事件 → 排除目标本人 → 按 userId 分组
-- 返回每个同屏好友的 matchCount（同屏次数）、worlds（世界列表）
-
-### 3. "某天活动时间线" / "XX 和 YY 昨晚同房吗"
-
-```
-1. get_friend_events(userId=A, types="friend-location", limit=5) → 最近位置变化
-   - created_at 是 UTC，+8 转北京时间
-   - location 格式 "wrld_xxx:instanceId~hidden(usr_owner)~region(jp)"；traveling 时看 travelingToLocation
-2. 比对 worldId + instanceId：相同 = 同房；确认时间重叠
-3. get_world_name(worldId) → 世界名
-```
-
-陷阱：`get_friend_events` 每个事件嵌完整用户 JSON（~50KB），limit 大会爆响应。用 `limit=5` + `offset` 分页；或只读顶层字段。
-
-### 4. "XX 几点上线 / 什么时候最容易碰到 TA" → `get_online_pattern`
-
-一次调用拿全部规律，不要逐条翻事件：
-
-```bash
-# 默认最近 30 天（北京时间自然日）；可传 days 或 startTime/endTime
-curl -s http://127.0.0.1:8799/mcp -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_online_pattern","arguments":{"userId":"<目标userId>"}}}'
-```
-
-返回：`hourly`（上线/下线/位置活跃按北京小时分桶）、`activeDates`（活跃日期）、`frequency`（活跃天数/活动比率/平均间隔/最长空档）、`peak`（登录/活跃/下线峰值小时 + suggestedWindow 最佳相遇时段）。
-
-### 5. 昵称管理
-
-好友昵称映射存本地库（`nicknames` 表），**不维护在 skill 文件里**：
-
-- 查询：`get_nicknames`（不带参数返回全部；`userId` 精确查；`query` 按昵称或显示名模糊查）
-- 写入：`set_nickname {userId, nickname, displayName?}`（upsert 幂等）
-- 建议工作流：用户给好友取中文昵称 → `search_users` 找 userId → `set_nickname` 写入 → 后续查询结果用昵称展示
-
-## 结果格式
-
-建议用昵称代替原始显示名以提高可读性。companion 数据可展示为：`| 排名 | 好友 | 共处时间 | 同屏实例 | 最近一次 |`，并附一行小结总结社交模式。
-
-### 地图/世界展示格式（用户固化要求）
-
-展示地图列表时按此格式（6 列）：
-
-```
-| 序号 | 封面 | 地图名称 | 热度 | 备注 | 地图链接 |
-```
-
-- **序号**：列表最前方，从 1 递增
-- **封面**：`imageUrl`，Markdown 内嵌 `![短名](url)`
-- **热度**：取 `heat` 中**优先级最高的非零字段**（officialFavorites > occupants > planetVisitors，与 recommend_worlds 输出一致），格式 `<icon><数值><单位>`：🔴≥100万 / 🔵≥1万 / ⚪<1万；数值≥1万时缩略为「万」（保留 1 位小数，如 `507万`、`7.4万`），<1万显示原数（如 `5068`）
-- **备注**：`note`（用户备注，无则省略该列）
-- **地图链接**：位于**备注后**，格式 `https://vrchat.com/home/world/{worldId}`（worldId 拼接）
-- **封面列省略规则**：封面无数据 或 QQ Bot 场景（QQ 消息无法渲染外链图片）时省略封面列，其余列不变
-
-完整示例（含封面）：`| 1 | ![超軽量ログインワールド](https://planetvrchat.net/wp-content/uploads/fetch-vrc-world/images/53110-thumb.webp) | 超軽量ログインワールド | 🔴507万 | 登录用轻量图 | https://vrchat.com/home/world/wrld_6a246432-e224-454f-8962-615182276e26 |`
-
-QQ Bot 场景示例（无封面）：`| 1 | 超軽量ログインワールド | 🔴507万 | 登录用轻量图 | https://vrchat.com/home/world/wrld_6a246432-e224-454f-8962-615182276e26 |`
+## 结果格式 → 社交展示格式（companion 表格）见 vrchat-social-queries；地图展示格式见 vrchat-world-queries §6
 
 ## 常见陷阱
 

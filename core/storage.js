@@ -27,6 +27,16 @@ export class Storage {
     this.db.pragma('busy_timeout = 5000');
 
     const ddl = readFileSync(DDL_PATH, 'utf-8');
+    // 迁移：旧库表名 new_worlds → world_kb（2026-08-16 更名，幂等）
+    // ⚠️ 必须在 DDL exec 之前执行！否则 CREATE TABLE IF NOT EXISTS world_kb 会先建出
+    // 空表，RENAME 因名字冲突失败，老数据残留在 new_worlds 中（代码全查 world_kb → 空）。
+    // 顺序：老库（仅 new_worlds）→ RENAME 带走数据 + 索引跟随 → DDL 建 idx_world_kb_visited。
+    const oldKbCols = this._query(`PRAGMA table_info(new_worlds)`);
+    const newKbCols = this._query(`PRAGMA table_info(world_kb)`);
+    if (oldKbCols.length > 0 && newKbCols.length === 0) {
+      this._run(`ALTER TABLE new_worlds RENAME TO world_kb`);
+      this._run(`DROP INDEX IF EXISTS idx_new_worlds_visited`);
+    }
     this.db.exec(ddl);
     // X 博主世界推荐表（x_world_digest 工具，幂等 CREATE IF NOT EXISTS）
     try {
@@ -45,39 +55,53 @@ export class Storage {
     if (!wcFavCols.some(c => c.name === 'favorited')) {
       this._run(`ALTER TABLE world_cache ADD COLUMN favorited INTEGER DEFAULT 0`);
     }
-    // 迁移：旧库 new_worlds 缺 sleep_ok 列（recommend_join 睡觉图评分用，幂等）
-    const nwCols = this._query(`PRAGMA table_info(new_worlds)`);
+    // 迁移：旧库 world_kb 缺 sleep_ok 列（recommend_join 睡觉图评分用，幂等）
+    const nwCols = this._query(`PRAGMA table_info(world_kb)`);
     if (!nwCols.some(c => c.name === 'sleep_ok')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN sleep_ok INTEGER DEFAULT 0`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN sleep_ok INTEGER DEFAULT 0`);
     }
     // 迁移：旧库 join_choices 缺 world_tags 列（类型偏好学习用，幂等）
     const jcCols = this._query(`PRAGMA table_info(join_choices)`);
     if (!jcCols.some(c => c.name === 'world_tags')) {
       this._run(`ALTER TABLE join_choices ADD COLUMN world_tags TEXT DEFAULT ''`);
     }
-    // 迁移：旧库 new_worlds 缺 tags/description/source 列（scan_new_worlds upsert 依赖，幂等）
-    const nwCols2 = this._query(`PRAGMA table_info(new_worlds)`);
+    // 迁移：旧库 world_kb 缺 tags/description/source 列（scan_new_worlds upsert 依赖，幂等）
+    const nwCols2 = this._query(`PRAGMA table_info(world_kb)`);
     if (!nwCols2.some(c => c.name === 'tags')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN tags TEXT DEFAULT ''`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN tags TEXT DEFAULT ''`);
     }
     if (!nwCols2.some(c => c.name === 'description')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN description TEXT DEFAULT ''`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN description TEXT DEFAULT ''`);
     }
     if (!nwCols2.some(c => c.name === 'source')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN source TEXT DEFAULT 'new'`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN source TEXT DEFAULT 'new'`);
     }
-    // 迁移：旧库 new_worlds 缺 user_rating 列（rate_world 用户反馈，幂等）
-    const nwCols3 = this._query(`PRAGMA table_info(new_worlds)`);
+    // 迁移：旧库 world_kb 缺 user_rating 列（rate_world 用户反馈，幂等）
+    const nwCols3 = this._query(`PRAGMA table_info(world_kb)`);
     if (!nwCols3.some(c => c.name === 'user_rating')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN user_rating INTEGER DEFAULT 0`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN user_rating INTEGER DEFAULT 0`);
     }
-    // 迁移：旧库 new_worlds 缺 author_id 列（作者维度推荐用，幂等）
-    const nwCols4 = this._query(`PRAGMA table_info(new_worlds)`);
+    // 迁移：旧库 world_kb 缺 author_id 列（作者维度推荐用，幂等）
+    const nwCols4 = this._query(`PRAGMA table_info(world_kb)`);
     if (!nwCols4.some(c => c.name === 'author_id')) {
-      this._run(`ALTER TABLE new_worlds ADD COLUMN author_id TEXT DEFAULT ''`);
+      this._run(`ALTER TABLE world_kb ADD COLUMN author_id TEXT DEFAULT ''`);
+    }
+    // 迁移：旧库 world_kb 缺 backlog 系列列（待逛地图列表，幂等）
+    const nwCols5 = this._query(`PRAGMA table_info(world_kb)`);
+    if (!nwCols5.some(c => c.name === 'backlog')) {
+      this._run(`ALTER TABLE world_kb ADD COLUMN backlog INTEGER DEFAULT 0`);
+    }
+    if (!nwCols5.some(c => c.name === 'backlog_added_at')) {
+      this._run(`ALTER TABLE world_kb ADD COLUMN backlog_added_at TEXT`);
+    }
+    if (!nwCols5.some(c => c.name === 'backlog_reason')) {
+      this._run(`ALTER TABLE world_kb ADD COLUMN backlog_reason TEXT DEFAULT ''`);
+    }
+    if (!nwCols5.some(c => c.name === 'backlog_priority')) {
+      this._run(`ALTER TABLE world_kb ADD COLUMN backlog_priority INTEGER DEFAULT 0`);
     }
     // 迁移：历史 tags='' 脏数据统一为 '[]'（json_each 对空串抛 malformed JSON，Review R2）
-    this._run(`UPDATE new_worlds SET tags = '[]' WHERE tags IS NULL OR tags = ''`);
+    this._run(`UPDATE world_kb SET tags = '[]' WHERE tags IS NULL OR tags = ''`);
     return this;
   }
 
@@ -142,6 +166,65 @@ export class Storage {
     params.$limit = limit;
     params.$offset = offset;
     return this._query(sql, params);
+  }
+
+  /**
+   * 批量取多个用户各自最新一条 friend-location 事件（get_online_friends 停留时长用）。
+   * 返回 Map<userId, {createdAt, content}>；某用户无事件则不在 Map 中。
+   * 窗口函数 PARTITION BY user_id 一次查询拿全，避免 N 次点查。
+   */
+  getLatestFriendLocations(userIds) {
+    if (!userIds || userIds.length === 0) return new Map();
+    const ph = userIds.map((_, i) => `$u${i}`).join(',');
+    const params = {};
+    userIds.forEach((id, i) => { params[`$u${i}`] = id; });
+    const rows = this._query(
+      `SELECT user_id, created_at, content_json FROM (
+         SELECT user_id, created_at, content_json,
+                ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+         FROM events
+         WHERE type = 'friend-location' AND user_id IN (${ph})
+       ) WHERE rn = 1`,
+      params
+    );
+    const map = new Map();
+    for (const r of rows) map.set(r.user_id, { createdAt: r.created_at, content: r.content_json });
+    return map;
+  }
+
+  /**
+   * 批量取每个用户本次在线会话的起点（get_online_friends 在线时长用，2026-08-16 新增）。
+   * 口径：会话起点 = 最近一次 friend-offline 之后最早的一条 friend-online。
+   * 为何不能直接取最新 friend-online：VRChat WS 重连/状态同步会重复推送 friend-online
+   * （实测 24h 527 条 vs ~30 人在线），最新一条会严重低估时长；MIN(>last_off) 天然跳过重复推送。
+   * 仅当用户从未有过 offline 记录时才取最早一条 friend-online（数据库记录以来首次上线）；
+   * 有 offline 但 offline 后无 online（事件丢失/数据不一致）→ 返回 NULL，调用方安全降级
+   * （避免把离线前时间当会话起点导致 onlineMinutes 高估，PR #36 审核 W1）。
+   * 返回 Map<userId, sessionStartIso|null>；无 friend-online 事件则不在 Map 中。
+   */
+  getOnlineSessionStarts(userIds) {
+    if (!userIds || userIds.length === 0) return new Map();
+    const ph = userIds.map((_, i) => `$u${i}`).join(',');
+    const params = {};
+    userIds.forEach((id, i) => { params[`$u${i}`] = id; });
+    const rows = this._query(
+      `WITH offs AS (
+         SELECT user_id, MAX(created_at) AS last_off FROM events
+         WHERE type='friend-offline' AND user_id IN (${ph}) GROUP BY user_id
+       )
+       SELECT e.user_id,
+              CASE WHEN o.last_off IS NULL THEN MIN(e.created_at)
+                   ELSE MIN(CASE WHEN e.created_at > o.last_off THEN e.created_at END) END
+              AS session_start
+       FROM events e
+       LEFT JOIN offs o ON e.user_id = o.user_id
+       WHERE e.type = 'friend-online' AND e.user_id IN (${ph})
+       GROUP BY e.user_id`,
+      params
+    );
+    const map = new Map();
+    for (const r of rows) map.set(r.user_id, r.session_start || null);
+    return map;
   }
 
   getRecentEvents({ limit = 50, type } = {}) {
@@ -520,18 +603,18 @@ export class Storage {
   /**
    * 用户反馈：给世界打好评/差评标记（Issue #19）
    * rating: -1=烂图(junk) / 0=清除标记 / 1=好图
-   * 若世界不在 new_worlds 表（如手动收藏的世界），自动插入一行兜底。
+   * 若世界不在 world_kb 表（如手动收藏的世界），自动插入一行兜底。
    */
   rateWorld({ worldId, rating = 0 }) {
     const r = parseInt(rating, 10);
     const finalRating = r === -1 ? -1 : (r === 1 ? 1 : 0);
     this._run(
-      `INSERT INTO new_worlds (world_id, world_name, tags, user_rating)
+      `INSERT INTO world_kb (world_id, world_name, tags, user_rating)
        VALUES ($worldId, '', '[]', $rating)
        ON CONFLICT(world_id) DO UPDATE SET user_rating = $rating`,
       { $worldId: worldId, $rating: finalRating }
     );
-    const rows = this._query(`SELECT world_id, world_name, user_rating FROM new_worlds WHERE world_id = $worldId`, { $worldId: worldId });
+    const rows = this._query(`SELECT world_id, world_name, user_rating FROM world_kb WHERE world_id = $worldId`, { $worldId: worldId });
     const row = rows[0];
     return { worldId: row.world_id, worldName: row.world_name || '', userRating: row.user_rating };
   }
@@ -540,14 +623,89 @@ export class Storage {
   markWorldVisited({ worldId }) {
     const now = new Date().toISOString();
     this._run(
-      `INSERT INTO new_worlds (world_id, world_name, tags, visited, visited_at)
+      `INSERT INTO world_kb (world_id, world_name, tags, visited, visited_at)
        VALUES ($worldId, '', '[]', 1, $now)
        ON CONFLICT(world_id) DO UPDATE SET visited = 1, visited_at = $now`,
       { $worldId: worldId, $now: now }
     );
-    const rows = this._query(`SELECT world_id, world_name, visited, visited_at FROM new_worlds WHERE world_id = $worldId`, { $worldId: worldId });
+    const rows = this._query(`SELECT world_id, world_name, visited, visited_at, backlog FROM world_kb WHERE world_id = $worldId`, { $worldId: worldId });
     const row = rows[0];
-    return { worldId: row.world_id, worldName: row.world_name || '', visited: row.visited === 1, visitedAt: row.visited_at };
+    return { worldId: row.world_id, worldName: row.world_name || '', visited: row.visited === 1, visitedAt: row.visited_at, backlog: row.backlog === 1 };
+  }
+
+  /** 待逛列表：加入/更新（幂等，重复加入 = 更新备注/优先级；世界不在表里插兜底行） */
+  addToBacklog({ worldId, reason = '', priority = 0 }) {
+    const now = new Date().toISOString();
+    const p = Math.min(Math.max(parseInt(priority, 10) || 0, 0), 2);
+    this._run(
+      `INSERT INTO world_kb (world_id, world_name, tags, backlog, backlog_added_at, backlog_reason, backlog_priority)
+       VALUES ($worldId, '', '[]', 1, $now, $reason, $priority)
+       ON CONFLICT(world_id) DO UPDATE SET
+         backlog = 1,
+         backlog_reason = CASE WHEN $reason != '' THEN $reason ELSE backlog_reason END,
+         backlog_priority = $priority,
+         backlog_added_at = COALESCE(backlog_added_at, $now)`,
+      { $worldId: worldId, $now: now, $reason: reason, $priority: p }
+    );
+    const rows = this._query(
+      `SELECT world_id, world_name, backlog, backlog_added_at, backlog_reason, backlog_priority, visited, visited_at
+       FROM world_kb WHERE world_id = $worldId`,
+      { $worldId: worldId }
+    );
+    const row = rows[0];
+    return {
+      worldId: row.world_id, worldName: row.world_name || '',
+      inBacklog: row.backlog === 1, addedAt: row.backlog_added_at,
+      reason: row.backlog_reason || '', priority: row.backlog_priority,
+      visited: row.visited === 1, visitedAt: row.visited_at,
+    };
+  }
+
+  /** 待逛列表：移除（backlog=0；保留行，世界知识不删） */
+  removeFromBacklog({ worldId }) {
+    this._run(`UPDATE world_kb SET backlog = 0 WHERE world_id = $worldId`, { $worldId: worldId });
+    const rows = this._query(`SELECT world_id, backlog FROM world_kb WHERE world_id = $worldId`, { $worldId: worldId });
+    return { worldId, removed: rows.length === 0 || rows[0].backlog === 0 };
+  }
+
+  /** 待逛列表：查询（pending = backlog=1 AND visited=0；visited=1 的逛完历史也可见） */
+  getBacklog({ status = 'pending', sortBy = 'added_at', limit = 20 } = {}) {
+    const st = ['pending', 'visited', 'all'].includes(status) ? status : 'pending';
+    const sortCol = ['added_at', 'priority', 'favorites'].includes(sortBy) ? sortBy : 'added_at';
+    limit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+    let where = 'WHERE backlog = 1';
+    if (st === 'pending') where += ' AND visited = 0';
+    else if (st === 'visited') where += ' AND visited = 1';
+    const order = sortCol === 'priority'
+      ? 'backlog_priority DESC, backlog_added_at DESC'
+      : `${sortCol === 'added_at' ? 'backlog_added_at' : sortCol} DESC`;
+    const total = this._query(`SELECT COUNT(*) AS cnt FROM world_kb ${where}`)[0].cnt;
+    const rows = this._query(
+      `SELECT world_id, world_name, author_name, favorites, occupants, popularity, description, tags,
+              created_at, visited, visited_at, backlog_added_at, backlog_reason, backlog_priority
+       FROM world_kb ${where} ORDER BY ${order} LIMIT ${limit}`
+    );
+    const worlds = rows.map(r => {
+      let worldTags = [];
+      try { worldTags = JSON.parse(r.tags || '[]'); } catch { /* 脏数据按空数组 */ }
+      return {
+        worldId: r.world_id,
+        worldName: r.world_name || '',
+        authorName: r.author_name || '',
+        favorites: r.favorites || 0,
+        occupants: r.occupants || 0,
+        popularity: r.popularity || 0,
+        description: r.description || '',
+        tags: Array.isArray(worldTags) ? worldTags : [],
+        created: r.created_at || '',
+        visited: r.visited === 1,
+        visitedAt: r.visited_at || '',
+        addedAt: r.backlog_added_at || '',
+        reason: r.backlog_reason || '',
+        priority: r.backlog_priority || 0,
+      };
+    });
+    return { total, status: st, worlds };
   }
 
   getWorldHistory(worldId, limit = 50) {
