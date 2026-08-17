@@ -85,6 +85,7 @@
 - `VRC_MONITOR_DB_PATH`：SQLite 数据库文件路径（默认 `<仓库>/vrc-monitor.sqlite3`）。可将数据库迁移到任意位置（如独立数据盘），配合常驻服务使用。
 - `VRC_MONITOR_BACKUP_DIR`：自动备份目录（默认 `<仓库>/backups`）。
 - `VRC_MONITOR_LOG_DIR`：常驻服务脚本的日志 / 修复记录目录（默认 `<仓库>/service-logs`，仅 `service-windows/` 脚本使用）。
+- `VRC_MONITOR_PYTHON`：执行 fetch-otp.py 的 Python 解释器路径（默认 PATH 中的 `python`）。以计划任务 / systemd / 容器等方式运行且 PATH 中无 python 时必须设置，否则 OTP 自动登录失败会陷入重试循环（每次循环 VRChat 都会重新发送验证码邮件）。**路径含空格无需自带引号**（如 `C:\Program Files\Python311\python.exe`），脚本执行时会自动加引号。
 
 ### 3. 启动服务
 
@@ -137,7 +138,7 @@ cp desktop/plugin.js "$HERMES_HOME/desktop-plugins/vrc-monitor/"
 
 ### 6. 配置 MCP 接口（可选但推荐）
 
-服务通过 MCP 协议暴露以下工具（get_online_friends / get_friend_info / get_friend_events / get_companions / get_online_pattern / get_nicknames / set_nickname / get_world_name / set_world_note / get_world_history / get_weekly_report / scan_new_worlds / get_new_worlds / get_mutual_friends / search_users / search_groups / search_worlds / search_planet_worlds / recommend_planet_worlds / search_booth_items / get_booth_item / get_booth_history / get_booth_searches / backup_database / get_user_groups / get_group_info / get_group_instances / get_group_announcement / get_group_heat / join_group / leave_group / peek_group_announcement / send_boop / get_boop_emojis / upload_emoji / upload_print / upload_gallery_image / download_print / download_gallery_image / send_friend_request / remove_friend / create_instance / invite_myself / open_world / rate_world / mark_world_visited / recommend_worlds / favorite_world / get_favorite_friends_locations / recommend_join / set_join_preference / get_join_preference / record_join_choice / get_join_learning / x_world_digest / x_scan_creators / x_creators / x_add_creator / x_remove_creator / x_worlds / get_my_favorite_worlds / get_my_favorite_groups 等，完整清单与参数见 `skills/vrc-monitor-agent/SKILL.md`「MCP 工具」章节），Hermes Agent 可直接调用，无需 curl 手写 JSON-RPC。
+服务通过 MCP 协议暴露以下工具（get_online_friends / get_friend_info / get_friend_events / get_companions / get_online_pattern / get_nicknames / set_nickname / get_world_name / set_world_note / get_world_history / get_weekly_report / scan_new_worlds / get_new_worlds / get_mutual_friends / search_users / search_groups / search_worlds / search_planet_worlds / recommend_planet_worlds / search_booth_items / get_booth_item / get_booth_history / get_booth_searches / backup_database / get_user_groups / get_group_info / get_group_instances / get_group_announcement / get_group_heat / join_group / leave_group / peek_group_announcement / send_boop / get_boop_emojis / upload_emoji / upload_print / upload_gallery_image / download_print / download_gallery_image / send_friend_request / remove_friend / create_instance / invite_myself / open_world / rate_world / mark_world_visited / add_to_backlog / get_backlog / remove_from_backlog / recommend_worlds / favorite_world / get_favorite_friends_locations / recommend_join / set_join_preference / get_join_preference / record_join_choice / get_join_learning / x_world_digest / x_scan_creators / x_creators / x_add_creator / x_remove_creator / x_worlds / get_my_favorite_worlds / get_my_favorite_groups 等，完整清单与参数见 `skills/vrc-monitor-agent/SKILL.md`「MCP 工具」章节），Hermes Agent 可直接调用，无需 curl 手写 JSON-RPC。
 
 在 Hermes 配置文件（`$HERMES_HOME/config.yaml`，Windows 为 `%LOCALAPPDATA%\hermes\config.yaml`）中添加：
 
@@ -161,7 +162,9 @@ mcp_servers:
 ```bash
 mkdir -p "$HERMES_HOME/skills"
 cp -r skills/vrc-monitor-agent "$HERMES_HOME/skills/"
-cp -r skills/vrc-monitor-companion-query "$HERMES_HOME/skills/"
+cp -r skills/vrchat-social-queries "$HERMES_HOME/skills/"
+cp -r skills/vrchat-world-queries "$HERMES_HOME/skills/"
+cp -r skills/vrchat-group-queries "$HERMES_HOME/skills/"
 cp -r skills/booth-query-display "$HERMES_HOME/skills/"
 cp -r skills/vrchat-assistant-development "$HERMES_HOME/skills/"
 ```
@@ -169,7 +172,9 @@ cp -r skills/vrchat-assistant-development "$HERMES_HOME/skills/"
 | Skill | 用途 | 何时需要 |
 |-------|------|----------|
 | `vrc-monitor-agent` | 好友/社交/群组/推荐等主体 MCP 工具清单、查询工作流、陷阱 | 日常查询与社交操作 |
-| `vrc-monitor-companion-query` | 「谁和我/和 XX 一起玩过」同屏交叉查询正确姿势 | 同屏/玩伴查询 |
+| `vrchat-social-queries` | 社交域工作流：在线五要素/同屏交叉查询/上线规律/昵称映射 | 同屏/玩伴查询、好友分析 |
+| `vrchat-world-queries` | 世界域工作流：挑新世界/待逛 backlog/推荐/PlanetVRC/X 博主 | 世界推荐与情报挖掘 |
+| `vrchat-group-queries` | 群组域工作流：群组查询/公告 403 分诊/join/leave/peek | 群组查询与操作 |
 | `booth-query-display` | BOOTH 素材检索工具（搜索/详情/热度/汉化/格式化展示） | BOOTH 素材查询 |
 | `vrchat-assistant-development` | **开发规范**：新增 MCP 工具三件套流程、跨平台约束、提交 PR 要求（DEVELOPMENT.md 的 skill 化） | **给本仓库添加/修改功能、提交 PR 时必装** |
 
