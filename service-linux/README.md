@@ -19,7 +19,7 @@ bash service-linux/setup-linux.sh
 脚本会自动：
 
 1. 解析仓库目录（脚本所在目录的上一级）与 `node` / `python` 可执行文件
-2. 由模板生成 `~/.config/systemd/user/vrc-monitor.service`（`%h/vrchat-assistant` → 实际仓库路径，node 路径烘焙进 `ExecStart`）
+2. 由模板生成 `~/.config/systemd/user/vrc-monitor.service`（`%h/vrchat-assistant` → 实际仓库路径，node 路径烘焙进 `ExecStart`；仓库或 node 路径含空格时自动对 `ExecStart` 参数加引号，避免 systemd 按空白拆分截断）
 3. `systemctl --user daemon-reload` + `enable --now`（立即启动 + 开机自启）
 4. `loginctl enable-linger`（**登出后服务继续运行**，无头服务器必需）
 
@@ -46,7 +46,7 @@ loginctl enable-linger    # 登出后继续运行
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `VRC_MONITOR_DIR` | 由 `WorkingDirectory` 隐含 | 项目根目录（systemd 方案无需手动设置） |
+| `VRC_MONITOR_DIR` | `start-monitor.js` 基于自身脚本目录自动探测 | 项目根目录（systemd 方案无需手动设置） |
 | `VRC_MONITOR_NODE` | 安装脚本烘焙的 node 路径 | node 可执行文件路径 |
 | `VRC_MONITOR_PYTHON` | PATH 中的 `python` | 执行 fetch-otp.py 的解释器。**systemd 用户服务 PATH 较精简，安装脚本检测到 PATH 无 `python` 时会自动注入 `python3` 路径**；若手动安装且 PATH 无 python，必须自行设置，否则 OTP 自动登录失败会陷入重试循环 |
 | `VRC_MONITOR_DB_PATH` | `<仓库>/vrc-monitor.sqlite3` | 数据库文件位置（可迁移到独立数据盘） |
