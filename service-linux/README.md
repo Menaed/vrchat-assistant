@@ -19,7 +19,7 @@ bash service-linux/setup-linux.sh
 脚本会自动：
 
 1. 解析仓库目录（脚本所在目录的上一级）与 `node` / `python` 可执行文件
-2. 由模板生成 `~/.config/systemd/user/vrc-monitor.service`（`%h/vrchat-assistant` → 实际仓库路径，node 路径烘焙进 `ExecStart`；仓库或 node 路径含空格时自动对 `ExecStart` 参数加引号，避免 systemd 按空白拆分截断）
+2. 由模板生成 `~/.config/systemd/user/vrc-monitor.service`（`%h/vrchat-assistant` → 实际仓库路径，node 路径烘焙进 `ExecStart`；仓库或 node 路径含空格时自动对 `ExecStart` 含空格 token 加引号，避免 systemd 按空白拆分截断；node 不在 PATH 的 env 模式（`/usr/bin/env node`）保持两个 token，仅对仓库路径加引号）
 3. `systemctl --user daemon-reload` + `enable --now`（立即启动 + 开机自启）
 4. `loginctl enable-linger`（**登出后服务继续运行**，无头服务器必需）
 
