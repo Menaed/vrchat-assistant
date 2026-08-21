@@ -27,11 +27,11 @@ This project is **AI-first**: it is built for AI agents to use and extend. Human
 
 ## Quick Start
 
-**Prerequisites**: Node.js ≥ 18, a VRChat account (with email 2FA enabled), and an IMAP-capable email (to receive OTP codes).
+**Prerequisites**: Node.js ≥ 18 and a VRChat account (with email OTP or TOTP 2FA enabled). An IMAP-capable email (to receive OTP codes) is only required when using email OTP login.
 
-1. Clone the repo, copy `credentials.example.json` to `credentials.json`, and fill in your VRChat account and email IMAP authorization code
+1. Clone the repo, copy `credentials.example.json` to `credentials.json`, and fill in your VRChat account; choose one auth method — email IMAP authorization code for email OTP, or configure `totp_secret` for automatic TOTP login
 2. Start the service: `node start-monitor.js`
-3. Verify: `curl http://127.0.0.1:8799/health` returns `Auth: true` and `WS: connected`
+3. Verify: `curl http://127.0.0.1:8799/health` returns `auth.authenticated: true` and `ws.status: connected`
 
 > For the full configuration (credentials, environment variables, auto-start, plugin installation), have an AI agent follow [AGENTS.md](./AGENTS.md) — you only need to provide your account and accept the result.
 
@@ -47,8 +47,9 @@ This project is **AI-first**: it is built for AI agents to use and extend. Human
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture: data flow, module responsibilities, dependencies | Understanding the codebase |
 | [docs/history/](./docs/history/INDEX.md) | Project evolution history: milestone timeline, monthly releases/PRs and their significance | New agents should read first |
 | [service-windows/](./service-windows/README.md) | Windows auto-start + crash recovery + daily repair reports (one-click script) | Running persistently on Windows |
+| [service-linux/](./service-linux/README.md) | Linux systemd user service: auto-start + crash recovery + journal logs (one-click script) | Running persistently on Linux |
 
-**MCP Tools**: the service exposes MCP tools covering friend queries, social interactions, media management, group operations, world recommendations, asset search, and more. **The complete tool list (all tools) is registered in the [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md) "MCP Tools" section** — agents call tools from there. The other skills provide workflow guidance per capability (without re-listing tools): `booth-query-display` (BOOTH search/display), `vrc-monitor-companion-query` (companion queries), `vrchat-assistant-development` (development guidelines).
+**MCP Tools**: the service exposes MCP tools covering friend queries, social interactions, media management, group operations, world recommendations, asset search, and more. **The complete tool list (all tools) is registered in the [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md) "MCP Tools" section** — agents call tools from there. The other skills provide workflow guidance per capability (without re-listing tools): `vrchat-social-queries` (social: online/companions/patterns/nicknames), `vrchat-world-queries` (worlds: backlog/recommend/lore), `vrchat-group-queries` (groups: queries/announcements), `booth-query-display` (BOOTH search/display), `vrchat-assistant-development` (development guidelines), `review-workflow` (PR/issue review workflow).
 
 ## 🧰 Auxiliary Tools (local, optional)
 
@@ -64,8 +65,14 @@ A: Network conditions in China may require a proxy. The service auto-falls back 
 **Q: OTP login keeps failing?**
 A: Check that `imap_auth_code` in `credentials.json` is a correct IMAP authorization code (not your login password). The service cools down 120s after auth failures (5min on 401 rate limit) and retries automatically.
 
+**Q: My account uses Authenticator (TOTP) 2FA and can't auto-login?**
+A: Auto-login is supported: add `totp_secret` to `credentials.json` (the Authenticator otpauth:// URI or base32 key) and the service generates the code locally via RFC 6238 for startup / runtime-401 / WS-reconnect logins (`auth.totpAutoEnabled: true` in `/health` when enabled). Without it, when `/health` returns `auth.needsTotp: true`, an agent calls the `submit_totp` MCP tool with the current 6-digit code to complete login. Auto-channel priority: email OTP → automatic TOTP → manual `submit_totp`.
+
 **Q: Do I need to handle expired cookies manually?**
-A: No. Service startup and WS reconnects automatically go through OTP login, and the valid cookie is persisted to `auth_cookie.txt`.
+A: No. Service startup and WS reconnects automatically go through OTP login, and the valid cookie is persisted to `auth_cookie.txt`. During runtime, when the API returns 401 (cookie expired), the service also auto-triggers re-login — if TOTP is required and `totp_secret` is configured it completes automatically; otherwise it enters `needsTotp` state and you call `submit_totp`, no restart needed.
+
+**Q: How do I know when login fails or manual action is needed?**
+A: Optional **login status notifications** (issue #69): copy `notify-config.example.json` to `notify-config.json` and set `enabled: true`. The service proactively notifies the host on entering `needsTotp`, email OTP fetch failure, runtime-401 auto re-auth failure, and auth recovery (no notification on normal auto-login success). `channels` support `desktop` (Linux notify-send / macOS osascript / Windows PowerShell toast) and `webhook` (POST JSON to `webhook_url`). It only notifies after `consecutive_fail_threshold` (default 3) consecutive failures, with `min_interval_sec` (default 300) anti-spam. Desktop notifications require a system notification daemon (Linux dunst/mako); silently degrade without one.
 
 **Q: The database file is too big?**
 A: Normal. ~300K events ≈ 300+ MB. better-sqlite3 (WAL mode) reads on demand and never loads the whole DB into memory.

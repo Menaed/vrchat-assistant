@@ -37,9 +37,12 @@ metadata:
 | `backup_database` | 立即备份数据库（WAL 在线备份，保留最近 2 份到 backups/）；服务启动 + 每 24h 自动备份 |
 | `get_friend_events` | 某好友的事件历史（本地库） |
 | `get_recent_events` | 最新事件流 |
-| `get_companions` | **同屏交叉查询**（指定时间窗口内同实例的好友；可查自己或任意好友） |
+| `get_companions` | **同屏交叉查询**（指定时间窗口内同实例的好友；可查自己或任意好友）。**默认不返回 userTimeline**（位置事件多时输出会过大被截断），仅返回 companions 汇总；需逐条位置明细时传 `includeTimeline=true` |
+| `get_friend_pair_meeting` | **好友对单次见面分析**（查任意两个好友之间「每次见面」的时段与时长；按实例切分，同一实例内同屏匹配合并为一次见面（**含实例内中途断开空档，合并为一次**），返回每次 start/end/durationMinutes/世界/实例 + meetingCount + totalDurationSeconds；口径：同实例且时间差 ≤ windowMinutes（默认30），排除 private/offline/traveling；startTime/endTime 与 days 二选一） |
+| `get_friend_pair_screen` | **好友对同屏次数与时长**（查任意两个好友之间的共玩/同房统计；精确口径：B 的每条可识别实例事件匹配 A 同一实例且时间差 ≤ windowMinutes（默认30）→ 计同屏；排除 private/offline/traveling，不同时间去过同一房不计；返回 matchCount（次数）、totalMinutes/totalSeconds（总时长，段首到段尾累加，**含实例内中途断开空档**）、worldDuration（按世界拆分时长）、worlds（共现世界）、matches（默认全量，可加 limit 限制条数）；startTime/endTime 与 days 二选一） |
 | `get_online_pattern` | **上线规律分析**（上线/下线/活跃时段分布 + 活跃天数/频率 + 峰值建议） |
-| `get_world_name` | 世界信息查询（懒刷新：缓存命中直接返回，forceRefresh 才走 API；含作者/容量/简介/标签/用户备注 note） |
+| `get_world_name` | 世界信息查询（懒刷新：缓存命中直接返回，forceRefresh 才走 API；含作者ID/作者名/容量/简介/标签/用户备注 note） |
+| `get_worlds_by_author` | **按作者列出全部世界**：authorId 或 authorName（内部经 /users 解析）→ GET /worlds?userId= 分页拉全该作者发布的全部图（worldId/名称/收藏/浏览/容量/标签/发布时间），顺带写 world_cache（含 author_id）。配合 get_world_name 返回的 authorId 使用（如「当前所在图作者的全部图加权重」） |
 | `set_world_note` | 世界用户备注写入/更新（本地存储，API 刷新不覆盖；空串清除） |
 | `get_world_history` | 世界信息变更历史（name/description/author/image_url/release_status/capacity/tags 字段级记录） |
 | `get_weekly_report` | 一周游戏周报（活跃天数/时长/世界 Top/同屏伙伴带昵称/自己的上线规律/群组活动/圈内活动日历；days 默认 7） |
@@ -95,6 +98,16 @@ metadata:
 | `x_add_creator` | 添加要追踪的 X 博主（VRChat 世界推荐博主；`screen_name` 不带 @） |
 | `x_remove_creator` | 移除追踪的 X 博主 |
 | `x_worlds` | 查看已收录的推荐世界列表（调试用） |
+| `submit_totp` | **提交 TOTP 验证码（手动兜底）**：在 credentials.json 配置 `totp_secret` 后，服务自动生成验证码登录，无需调用本工具；仅在自动登录失败（验证码被拒/secret 有误）或未配置 secret 时，账号处于 `needsTotp` 状态（`/health` 的 `auth.needsTotp: true`）才需调用本工具提交当前 6 位验证码（`code` 必填；登录后 WS 自动重连） |
+| `get_friend_favorite_groups` | **好友收藏分组列表**（2026-08-19 新增）：GET /favorite/groups?type=friend + /favorites?type=friend → 分组名/显示名/成员数。与 get_favorite_friends_locations 互补（后者看组内好友实时位置） |
+| `favorite_friend` | **添加好友到收藏分组**（2026-08-19 新增）：POST /favorites type=friend。userId/displayName 二选一；groupName 必填（显示名或分组名）；须已是好友（403 返回 not friends）；重复收藏返回 already favorited（不抛错）。写操作，confirm: true 才执行 |
+| `unfavorite_friend` | **从收藏分组移除好友**（2026-08-19 新增）：DELETE /favorites/{记录id}（先查记录 id 再删，可逆）。groupName 可选（省略=从全部分组移除）。写操作，confirm: true 才执行 |
+| `move_friend_group` | **移动好友到另一分组**（2026-08-19 新增）：删旧建新（API 无原地更新 tags 端点，与 VRCX 行为一致）。toGroup 必填。写操作，confirm: true 才执行 |
+| `get_friend_profile_changes` | **好友资料变更历史**（2026-08-19 新增）：Avatar/Bio/状态/头像图标/代词变更记录。事件管道实时采集 friend-update 的 user 对象 diff 落库，与 VRCX 迁移数据（feed_avatar/feed_status/feed_bio）同 type 打通。userId 可选（省略=全部好友）；types 逗号分隔过滤（avatar/status/bio/user_icon/pronouns）；limit(1-200)/offset 分页。每次变更返回 change 含当前值+旧值 |
+| `get_notifications` | **通知收件箱**（2026-08-19 新增）：读取当前账号未读通知（旧 v1 系统）。limit/offset 分页；types 过滤（friendRequest/invite/message/boop/requestInvite/votetokick/inviteResponse/requestInviteResponse）；hidden=true 查已隐藏。返回字段：returned（本页返回条数）、shown（过滤后条数）、hasMore（本页取满 limit 时可能还有下一页）。注意：API 的 type 查询参数已废弃不生效（本地过滤）；seen/receiverUserId 仅 WS 推送有，REST 不返回 |
+| `see_notification` / `hide_notification` | **通知已读/隐藏**：标记已读 PUT .../see；隐藏清除 PUT .../hide（旧 v1 hide 即删除）。notificationId 必填 |
+| `accept_friend_request` | **接受好友请求**（2026-08-19 新增）：PUT /auth/user/notifications/{id}/accept，**接受即直接加为好友**，不可逆，必须 confirm: true 才执行，否则只预览 |
+| `decline_friend_request` | **拒绝好友请求**（2026-08-19 新增）：旧 v1 无独立拒绝端点，hide 即清除该通知（对方不会收到明确拒绝提示），必须 confirm: true 才执行，否则只预览 |
 
 调用方式（HTTP SSE JSON-RPC）：
 
@@ -151,6 +164,10 @@ boop 通知落库的顶层事件类型是 `notification-v2`（不是 boop），b
 - 服务自动从邮箱 IMAP 抓取 OTP 验证码登录，无人值守
 - QQ 邮箱有"自动分类"功能会把验证码邮件归档到分类文件夹（IMAP 名含 `VRChat`，modified UTF-7 编码）——fetch-otp.py 已带文件夹遍历兜底，若 OTP 一直失败先想到这个
 - 认证失败有 120s 冷却，401 限流 5min 冷却，会自愈
+
+### 登录状态主动通知（issue #69）
+
+无人值守服务默认只写日志。可配置 `notify-config.json`（复制 `notify-config.example.json`）开启主动通知：在「需人工介入/异常」时（进入 needsTotp、邮箱 OTP 抓取失败、运行期 401 自动重认证失败、认证恢复）提醒宿主，正常自动登录不通知。`channels` 支持 `desktop`（Linux notify-send / macOS osascript / Windows PowerShell toast）与 `webhook`（POST JSON 到 webhook_url）。去抖：连续失败达 `consecutive_fail_threshold`（默认 3）且距上次通知超 `min_interval_sec`（默认 300）才发送。默认关闭，缺文件或 enabled:false 不影响服务。桌面通知需系统通知守护（Linux dunst/mako），无守护时静默降级不崩服务。
 
 ### 代理（国内网络）
 

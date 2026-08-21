@@ -27,11 +27,11 @@
 
 ## クイックスタート
 
-**前提条件**：Node.js ≥ 18、VRChat アカウント（メール 2FA 有効）、IMAP 対応メール（OTP コード受信用）。
+**前提条件**：Node.js ≥ 18、VRChat アカウント（メール OTP または TOTP 二段階認証を有効化）。メール OTP ログイン時のみ IMAP 対応メール（OTP コード受信用）が必要です。
 
-1. リポジトリをクローンし、`credentials.example.json` を `credentials.json` にコピーして VRChat アカウントとメールの IMAP 認証コードを記入
+1. リポジトリをクローンし、`credentials.example.json` を `credentials.json` にコピーして VRChat アカウントを記入；認証は二択——メール OTP なら IMAP 認証コード、または `totp_secret` を設定して TOTP 自動ログイン
 2. サービス起動：`node start-monitor.js`
-3. 確認：`curl http://127.0.0.1:8799/health` が `Auth: true`、`WS: connected` を返す
+3. 確認：`curl http://127.0.0.1:8799/health` が JSON で `auth.authenticated: true`、`ws.status: connected` を返す
 
 > 完全な設定（認証情報、環境変数、自動起動、プラグイン導入）は AI エージェントに [AGENTS.md](./AGENTS.md) に従って実行させてください——あなたが行うのはアカウントの提供と受け入れだけです。
 
@@ -47,8 +47,9 @@
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | システムアーキテクチャ：データフロー、モジュール責務、依存関係 | コードベース理解時 |
 | [docs/history/](./docs/history/INDEX.md) | プロジェクト進化史：マイルストーン、月次リリース/PR とその意義 | 新規エージェントは最初に読む |
 | [service-windows/](./service-windows/README.md) | Windows 自動起動 + クラッシュ自己復旧 + 毎日修復レポート（ワンクリックスクリプト） | Windows で常駐運用する場合 |
+| [service-linux/](./service-linux/README.md) | Linux systemd ユーザーサービス：自動起動 + クラッシュ自己復旧 + journal ログ（ワンクリックスクリプト） | Linux で常駐運用する場合 |
 
-**MCP ツール**：サービスはフレンド照会、ソーシャル操作、メディア管理、グループ操作、ワールドレコメンド、アセット検索などの分野をカバーする MCP ツールを公開しています。**完全なツール一覧（全ツール）は [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md) の「MCP ツール」セクションに統一登録されています**——エージェントはそこから呼び出します。他の skill は各分野のワークフロー補助です（ツールの重複登録はしません）：`booth-query-display`（BOOTH 検索/表示）、`vrc-monitor-companion-query`（同インスタンスクエリ）、`vrchat-assistant-development`（開発ガイドライン）。
+**MCP ツール**：サービスはフレンド照会、ソーシャル操作、メディア管理、グループ操作、ワールドレコメンド、アセット検索などの分野をカバーする MCP ツールを公開しています。**完全なツール一覧（全ツール）は [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md) の「MCP ツール」セクションに統一登録されています**——エージェントはそこから呼び出します。他の skill は各分野のワークフロー補助です（ツールの重複登録はしません）：`vrchat-social-queries`（ソーシャル：オンライン/同インスタンス/パターン/ニックネーム）、`vrchat-world-queries`（ワールド：待逛/レコメンド/情報探索）、`vrchat-group-queries`（グループ：照会/アナウンス）、`booth-query-display`（BOOTH 検索/表示）、`vrchat-assistant-development`（開発ガイドライン）、`review-workflow`（PR/issue レビューワークフロー）。
 
 ## 🧰 補助ツール（ローカル・任意）
 
@@ -64,8 +65,14 @@ A: 中国国内のネットワーク環境ではプロキシが必要な場合�
 **Q: OTP ログインが失敗し続ける？**
 A: `credentials.json` の `imap_auth_code` が正しい IMAP 認証コードか（ログインパスワードではない）確認してください。認証失敗後は 120 秒（401 レート制限時は 5 分）のクールダウン後に自動再試行します。
 
+**Q: Authenticator（TOTP）二段階認証を有効にしていて自動ログインできない？**
+A: 自動ログインに対応しています：`credentials.json` に `totp_secret`（Authenticator の otpauth:// URI または base32 キー）を設定すると、RFC 6238 でローカル生成したコードで起動時・実行中 401・WS 再接続を全て自動ログインします（有効時は `/health` の `auth.totpAutoEnabled: true`）。未設定の場合は `/health` が `auth.needsTotp: true` を返した際、MCP ツール `submit_totp` で現在の 6 桁コードを送信してログインを完了できます。自動チャネルの優先順位：メール OTP → 自動 TOTP → 手動 `submit_totp`。
+
 **Q: Cookie の期限切れは手動で対応が必要？**
-A: 不要です。サービス起動時と WS 再接続時に自動で OTP ログインを行い、有効な Cookie は `auth_cookie.txt` に自動保存されます。
+A: 不要です。サービス起動時と WS 再接続時に自動で OTP ログインを行い、有効な Cookie は `auth_cookie.txt` に自動保存されます。**実行中に** API が 401（Cookie 期限切れ）を返した場合も自動で再ログインを試みます。TOTP が必要な場合、`totp_secret` を設定していれば自動で完了し、未設定なら `needsTotp` 状態になり `submit_totp` を呼べば完了します（再起動不要）。
+
+**Q: ログイン失敗・手動対応が必要なときにどう知る？**
+A: オプションの**ログイン状態の通知**（issue #69）：`notify-config.example.json` を `notify-config.json` にコピーして `enabled: true` に設定すると、`needsTotp` 突入・メール OTP 取得失敗・実行中 401 自動再認証失敗・認証復旧の際にホストへ通知します（正常な自動ログイン成功時は通知しません）。`channels` は `desktop`（Linux notify-send / macOS osascript / Windows PowerShell toast）と `webhook`（webhook_url へ JSON を POST）に対応。`consecutive_fail_threshold`（既定 3）連続失敗して初めて通知し、`min_interval_sec`（既定 300）で防災。デスクトップ通知はシステム通知デーモン（Linux dunst/mako）が必要で、無い場合は静かに降格します。
 
 **Q: データベースファイルが大きすぎる？**
 A: 正常です。約 30 万イベント ≈ 300+ MB。better-sqlite3（WAL モード）はオンデマンド読み込みで、DB 全体をメモリに載せません。

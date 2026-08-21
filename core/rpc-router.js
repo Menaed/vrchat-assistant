@@ -6,6 +6,7 @@
  */
 
 import { ctx, log } from './server-context.js';
+import { notifier } from './notifier.js';
 import { CUSTOM_TOOLS } from './mcp-definitions.js';
 import { sendSSE, sendError } from './http-server.js';
 
@@ -35,9 +36,27 @@ import {
 } from './handlers/instance.js';
 
 import {
+  handleGetFriendFavoriteGroups,
+  handleFavoriteFriend,
+  handleUnfavoriteFriend,
+  handleMoveFriendGroup,
+} from './handlers/friend-favorites.js';
+import {
+  handleGetNotifications,
+  handleSeeNotification,
+  handleHideNotification,
+  handleAcceptFriendRequest,
+  handleDeclineFriendRequest,
+} from './handlers/notifications.js';
+
+import {
   handleGetFriendEvents,
   handleGetRecentEvents,
+  handleGetFriendPairMeetings,
+  handleGetFriendPairScreen,
+  handleGetFriendProfileChanges,
   handleGetWorldName,
+  handleGetWorldsByAuthor,
   handleSetWorldNote,
   handleGetWorldHistory,
   handleGetWeeklyReport,
@@ -121,6 +140,8 @@ import {
   handleGetMyFavoriteGroups,
 } from './handlers/favorite-worlds.js';
 
+import { handleSubmitTotp } from './handlers/auth.js';
+
 export async function handleRpc(rpc, session, res) {
   const { id, method, params } = rpc;
   const { api, rateLimiter } = ctx;
@@ -170,6 +191,40 @@ export async function handleRpc(rpc, session, res) {
             result = { success: true, userId: args.userId, booped: true };
             break;
           }
+          case 'submit_totp': {
+            result = await handleSubmitTotp(args);
+            break;
+          }
+          // 好友收藏分组管理（2026-08-19 新增）
+          // ⚠️ 不包 rateLimiter：handler 内部（fetchFriendGroups）已逐请求限流，外层包裹会死锁（DEVELOPMENT.md §5 事故教训）
+          case 'get_friend_favorite_groups':
+            result = await handleGetFriendFavoriteGroups();
+            break;
+          case 'favorite_friend':
+            result = await handleFavoriteFriend(args);
+            break;
+          case 'unfavorite_friend':
+            result = await handleUnfavoriteFriend(args);
+            break;
+          case 'move_friend_group':
+            result = await handleMoveFriendGroup(args);
+            break;
+          // 通知收件箱（2026-08-19 新增）
+          case 'get_notifications':
+            result = await rateLimiter.execute(() => handleGetNotifications(args));
+            break;
+          case 'see_notification':
+            result = await rateLimiter.execute(() => handleSeeNotification(args));
+            break;
+          case 'hide_notification':
+            result = await rateLimiter.execute(() => handleHideNotification(args));
+            break;
+          case 'accept_friend_request':
+            result = await rateLimiter.execute(() => handleAcceptFriendRequest(args));
+            break;
+          case 'decline_friend_request':
+            result = await rateLimiter.execute(() => handleDeclineFriendRequest(args));
+            break;
           case 'get_boop_emojis': {
             result = await rateLimiter.execute(() => handleGetBoopEmojis());
             break;
@@ -275,8 +330,21 @@ export async function handleRpc(rpc, session, res) {
           case 'get_recent_events':
             result = handleGetRecentEvents(args);
             break;
+          case 'get_friend_pair_meeting':
+            result = handleGetFriendPairMeetings(args);
+            break;
+          case 'get_friend_pair_screen':
+            result = handleGetFriendPairScreen(args);
+            break;
+          case 'get_friend_profile_changes':
+            result = handleGetFriendProfileChanges(args);
+            break;
           case 'get_world_name':
             result = await rateLimiter.execute(() => handleGetWorldName(args));
+            break;
+          case 'get_worlds_by_author':
+            // 不包 rateLimiter：handler 内部对 /users、/worlds 分页已逐请求限流
+            result = await handleGetWorldsByAuthor(args);
             break;
           case 'set_world_note':
             result = handleSetWorldNote(args);
@@ -445,6 +513,13 @@ export async function handleRpc(rpc, session, res) {
           result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] },
         }]);
       } catch (err) {
+        // 401 自动重认证后若需要 TOTP，_request 抛 needsTotp 错误：
+        // 在此同步 serverState，让 /health 与 submit_totp 流程感知待验证状态
+        if (err.needsTotp) {
+          ctx.serverState.needsTotp = true;
+          log('🔑 检测到需要 TOTP 验证码，请调用 submit_totp 完成登录');
+          notifier.notifyAuth('needsTotp', '运行期会话失效需 TOTP 验证码，服务暂停——请调用 submit_totp 提交当前验证码');
+        }
         log(`❌ ${name} failed: ${err.message}`);
         sendError(res, id, err.message);
       }

@@ -3,6 +3,7 @@
  */
 
 import { ctx, log } from '../server-context.js';
+import { resolveWorldNames } from '../world-names.js';
 
 export async function handleGetFriendEvents({ userId, limit = 20, offset = 0, types }) {
   const { storage } = ctx;
@@ -19,6 +20,38 @@ export async function handleGetFriendEvents({ userId, limit = 20, offset = 0, ty
     return { userId, total: filtered.length, events: filtered };
   }
   return { userId, total: events.length, events };
+}
+
+export function handleGetFriendPairMeetings({ userIdA, userIdB, startTime, endTime, days, windowMinutes }) {
+  const { storage } = ctx;
+  if (!userIdA || !userIdB) throw new Error('userIdA and userIdB are required');
+  if (userIdA === userIdB) throw new Error('userIdA and userIdB must be different');
+  let start, end;
+  if (startTime && endTime) {
+    start = startTime;
+    end = endTime;
+  } else {
+    const d = days || 30;
+    end = new Date().toISOString();
+    start = new Date(Date.now() - d * 86400000).toISOString();
+  }
+  return storage.findFriendPairMeetings(userIdA, userIdB, start, end, windowMinutes);
+}
+
+export function handleGetFriendPairScreen({ userIdA, userIdB, startTime, endTime, days, windowMinutes, limit }) {
+  const { storage } = ctx;
+  if (!userIdA || !userIdB) throw new Error('userIdA and userIdB are required');
+  if (userIdA === userIdB) throw new Error('userIdA and userIdB must be different');
+  let start, end;
+  if (startTime && endTime) {
+    start = startTime;
+    end = endTime;
+  } else {
+    const d = days || 30;
+    end = new Date().toISOString();
+    start = new Date(Date.now() - d * 86400000).toISOString();
+  }
+  return storage.findFriendPairScreen(userIdA, userIdB, start, end, windowMinutes, limit);
 }
 
 export function handleGetRecentEvents({ limit = 30, offset = 0, typeFilter, userIdFilter }) {
@@ -54,6 +87,7 @@ export async function handleGetWorldName({ worldId, forceRefresh }) {
   const result = {
     worldId: w.id,
     name: w.name,
+    authorId: w.authorId,
     authorName: w.authorName,
     capacity: w.capacity,
     occupants: w.occupants,
@@ -67,12 +101,78 @@ export async function handleGetWorldName({ worldId, forceRefresh }) {
   };
   // 写入缓存（不覆盖 note）
   storage.upsertWorld({
-    worldId: w.id, name: w.name, authorName: w.authorName,
+    worldId: w.id, name: w.name, authorId: w.authorId, authorName: w.authorName,
     capacity: w.capacity, favorites: w.favorites,
     releaseStatus: w.releaseStatus, tags: w.tags || [],
     description: w.description || '', imageUrl: w.imageUrl || '',
   });
   return result;
+}
+
+/**
+ * 通过作者 ID / 作者名列出该作者发布的全部世界。
+ * authorName 给定 → GET /users?search 精确匹配解析 userId；
+ * 然后用 GET /worlds?userId=<authorId>&n=100&offset=... 分页拉全。
+ */
+export async function handleGetWorldsByAuthor({ authorId, authorName, limit = 100 }) {
+  const { storage, api, rateLimiter } = ctx;
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+  if (!authorId && !authorName) throw new Error('authorId or authorName is required');
+  if (authorId && authorName) throw new Error('authorId and authorName are mutually exclusive');
+
+  let resolvedAuthorId = authorId;
+  let resolvedAuthorName = authorName || '';
+  if (authorName) {
+    const target = authorName.trim();
+    const ur = await rateLimiter.execute(() => api._request('GET', `/users?search=${encodeURIComponent(target)}&n=10`));
+    if (ur.status !== 200 || !Array.isArray(ur.data) || ur.data.length === 0) {
+      throw new Error(`作者未找到: ${target}`);
+    }
+    const norm = s => (s || '').toLowerCase().replace(/\s+/g, '');
+    const user = ur.data.find(u => norm(u.displayName) === norm(target));
+    if (!user?.id) throw new Error(`作者未找到(精确匹配): ${target}`);
+    resolvedAuthorId = user.id;
+    resolvedAuthorName = user.displayName || authorName;
+  }
+
+  const worlds = [];
+  let offset = 0;
+  while (worlds.length < cap) {
+    const n = Math.min(100, cap - worlds.length);
+    const r = await rateLimiter.execute(() => api._request('GET', `/worlds?userId=${encodeURIComponent(resolvedAuthorId)}&n=${n}&offset=${offset}`));
+    if (r.status !== 200 || !Array.isArray(r.data)) break;
+    if (r.data.length === 0) break;
+    for (const w of r.data) {
+      worlds.push({
+        worldId: w.id,
+        name: w.name,
+        authorId: w.authorId,
+        authorName: w.authorName,
+        description: (w.description || '').slice(0, 200),
+        imageUrl: w.imageUrl,
+        favorites: w.favorites || 0,
+        visits: w.visits || 0,
+        capacity: w.capacity || 0,
+        releaseStatus: w.releaseStatus,
+        tags: Array.isArray(w.tags) ? w.tags : [],
+        publishedAt: w.publicationDate || w.createdAt || null,
+      });
+      // 顺带写缓存（带 authorId，方便后续推荐/查询）
+      try {
+        storage.upsertWorld({
+          worldId: w.id, name: w.name, authorId: w.authorId, authorName: w.authorName,
+          capacity: w.capacity, favorites: w.favorites, releaseStatus: w.releaseStatus,
+          tags: Array.isArray(w.tags) ? w.tags : [], description: w.description || '', imageUrl: w.imageUrl || '',
+        });
+      } catch (_) {}
+      if (worlds.length >= cap) break;
+    }
+    if (r.data.length < n) break;
+    offset += r.data.length;
+  }
+
+  log(`🔍 get_worlds_by_author: ${resolvedAuthorName} (${resolvedAuthorId}) → ${worlds.length} 张图`);
+  return { authorId: resolvedAuthorId, authorName: resolvedAuthorName, total: worlds.length, worlds };
 }
 
 export function handleSetWorldNote({ worldId, note }) {
@@ -88,6 +188,39 @@ export function handleGetWorldHistory({ worldId, limit = 50 }) {
   const { storage } = ctx;
   if (!worldId) throw new Error('worldId is required');
   return { worldId, history: storage.getWorldHistory(worldId, limit) };
+}
+
+// 好友资料变更历史（2026-08-19 新增，配合事件管道 friend-profile 变更追踪）。
+// 查询 events 表中 content_json.type ∈ {avatar,status,bio,user_icon,pronouns} 的记录。
+// userId 可选（省略 = 全部好友），types 逗号分隔过滤，limit/offset 分页。
+export function handleGetFriendProfileChanges({ userId, limit = 50, offset = 0, types }) {
+  const { storage } = ctx;
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+  const off = Math.max(parseInt(offset, 10) || 0, 0);
+  const rows = storage.getFriendProfileChanges(userId || '', { limit: cap, offset: off, types });
+  const total = storage.getFriendProfileChangeCount(userId || '', { types });
+  const changes = rows.map(r => {
+    let c = {};
+    try { c = JSON.parse(r.content_json); } catch {}
+    const payload = { ...c };
+    delete payload.userId; delete payload.displayName; delete payload.type; delete payload.vrcxId;
+    return {
+      userId: r.user_id,
+      displayName: r.display_name,
+      changeType: c.type,
+      source: r.source,
+      createdAt: r.created_at,
+      change: payload,
+    };
+  });
+  return {
+    userId: userId || null,
+    types: types ? String(types).split(',').map(t => t.trim()) : null,
+    total,
+    limit: cap,
+    offset: off,
+    changes,
+  };
 }
 
 export async function handleGetWeeklyReport({ days = 7 }) {
@@ -121,26 +254,11 @@ export async function handleGetWeeklyReport({ days = 7 }) {
   // 3. 自己的上线规律（复用 getOnlinePattern，window = 30 天）
   const pattern = storage.getOnlinePattern(userId, { days: Math.max(days, 30) });
 
-  // 4. 世界名解析（缓存优先，缺失批量 API 查询并写 world_cache——懒刷新，无 TTL 自动过期）
+  // 4. 世界名解析（缓存优先，缺失批量 API 查询并写 world_cache——懒刷新，无 TTL 自动过期；
+  //    统一走 resolveWorldNames，失败写进程内负缓存避免重复重试）
   const allWorldIds = new Set([...worldMinutes.keys(), ...(function(){ const s=new Set(); for (const d of dayWorlds.values()) for (const w of d) s.add(w); return s; })()]);
-  const worldNameMap = {};
-  const missingWorlds = [];
-  for (const wid of allWorldIds) {
-    const cached = storage.getWorldName(wid);
-    if (cached && cached.name) worldNameMap[wid] = cached.name;
-    else missingWorlds.push(wid);
-  }
-  // 批量 API 查缺失世界名（串行，rateLimiter 在 RPC case 外层已包）
-  for (const wid of missingWorlds) {
-    try {
-      const r = await api._request('GET', `/worlds/${wid}`);
-      if (r.status === 200 && r.data) {
-        const w = r.data;
-        worldNameMap[wid] = w.name || wid;
-        storage.upsertWorld({ worldId: w.id, name: w.name, authorName: w.authorName, capacity: w.capacity, favorites: w.favorites, releaseStatus: w.releaseStatus, tags: w.tags || [], description: w.description || '', imageUrl: w.imageUrl || '' });
-      } else worldNameMap[wid] = wid;
-    } catch { worldNameMap[wid] = wid; }
-  }
+  const nameMap = await resolveWorldNames(ctx, [...allWorldIds], { throttleMs: 0, onFail: (wid) => wid });
+  const worldNameMap = Object.fromEntries([...nameMap.entries()]);
 
   // 5. 群组活动（自己进过的群组房）——从 sessions 对应的事件里找 ~group(grp_/gmem_xxx)
   //    直接查 user-location 事件的 groupId
@@ -161,22 +279,14 @@ export async function handleGetWeeklyReport({ days = 7 }) {
         groupIds.add(m[1]);
         const wid = loc.split(':')[0];
         groupActivities.push({ time: row.created_at, worldId: wid, worldName: worldNameMap[wid] || wid, groupId: m[1] });
-        // 群组房可能停留 <3min 未进 worldMinutes，这里补入世界名解析集合
-        if (!worldNameMap[wid] && !missingWorlds.includes(wid)) missingWorlds.push(wid);
       }
     } catch {}
   }
-  // 补充解析群组房的世界名（第 4 步未覆盖的）
-  for (const wid of missingWorlds) {
-    if (worldNameMap[wid]) continue;
-    try {
-      const r = await api._request('GET', `/worlds/${wid}`);
-      if (r.status === 200 && r.data) {
-        const w = r.data;
-        worldNameMap[wid] = w.name || wid;
-        storage.upsertWorld({ worldId: w.id, name: w.name, authorName: w.authorName, capacity: w.capacity, favorites: w.favorites, releaseStatus: w.releaseStatus, tags: w.tags || [], description: w.description || '', imageUrl: w.imageUrl || '' });
-      } else worldNameMap[wid] = wid;
-    } catch { worldNameMap[wid] = wid; }
+  // 补充解析群组房的世界名（第 4 步未覆盖的；resolveWorldNames 内部有负缓存，不会重复 API）
+  const groupWids = [...new Set(groupActivities.map(a => a.worldId).filter(w => w && !worldNameMap[w]))];
+  if (groupWids.length > 0) {
+    const gNameMap = await resolveWorldNames(ctx, groupWids, { throttleMs: 0, onFail: (wid) => wid });
+    for (const [wid, name] of gNameMap.entries()) worldNameMap[wid] = name;
   }
   // 回填 groupActivities 的世界名
   for (const a of groupActivities) {

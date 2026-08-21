@@ -23,12 +23,19 @@
    - **✅ 幂等说明（v1.2.0 起，PR #14 已修复）**：迁移记录带 `vrcxId` 标记 + events 表 JSON 表达式唯一索引 + `INSERT OR IGNORE`，**重复执行自动跳过已迁移记录**（只补新增，不重复插入）。旧版脚本（无 vrcxId）产生的迁移数据会被检测并提示，需 `--force` 才会重插（防误全量重插）。迁移完成后 `node start-monitor.js` 启动服务。
    - 若用户**不需要导入**，直接进入「配置步骤」。
 
+3. **是否愿意参与本仓库的 PR/issue 协作审核（AGENT-REVIEW 协议）？**
+   - 本仓库支持**协作审核**：多个独立部署的 AI Agent 可以共同参与 PR / issue 审核，通过认领评论声明参与，满员（默认 3 人）后不再重复劳动。协议见仓库根目录 `AGENT-REVIEW.md`。
+   - 参与是**完全自愿、可随时退出**的：不参与不影响任何功能；参与后 Agent 会定时检查 open PR/issue，认领未满员的条目并提交审核意见（只读，不合并）。
+   - 若用户**愿意参与**：Agent 在完成「配置步骤」后，按 `AGENT-REVIEW.md` §1 配置定时检查（参考脚本 `scripts/agent-review.py`）。
+   - 若用户**不愿意参与**：跳过即可，Agent 不得自行参与。
+
 | 迁移项 | VRCX 数据表 | 说明 |
 |--------|------------|------|
 | 好友列表 | `friend_log_current` | 好友 userId、显示名、信任等级 |
 | 好友备注 | `memos` | 好友昵称/备注文本 |
 | 世界缓存 | `cache_world` | 世界 ID、名称、作者、缩略图等 |
 | 位置变更 | `feed_gps` | 好友何时在哪个世界 |
+| 自己的位置历史 | `gamelog_location` | 本账号自己的位置历史（VRCX 游戏日志解析），迁移为 `user-location` 事件，供 `get_companions` 交叉匹配好友位置查同屏 |
 | 上下线记录 | `feed_online_offline` | 好友上线/下线时间及位置 |
 | Avatar 变更 | `feed_avatar` | 好友更换 Avatar 记录 |
 | 状态变更 | `feed_status` | 好友状态文本变更 |
@@ -138,7 +145,7 @@ cp desktop/plugin.js "$HERMES_HOME/desktop-plugins/vrc-monitor/"
 
 ### 6. 配置 MCP 接口（可选但推荐）
 
-服务通过 MCP 协议暴露以下工具（get_online_friends / get_friend_info / get_friend_events / get_companions / get_online_pattern / get_nicknames / set_nickname / get_world_name / set_world_note / get_world_history / get_weekly_report / scan_new_worlds / get_new_worlds / get_mutual_friends / search_users / search_groups / search_worlds / search_planet_worlds / recommend_planet_worlds / search_booth_items / get_booth_item / get_booth_history / get_booth_searches / backup_database / get_user_groups / get_group_info / get_group_instances / get_group_announcement / get_group_heat / join_group / leave_group / peek_group_announcement / send_boop / get_boop_emojis / upload_emoji / upload_print / upload_gallery_image / download_print / download_gallery_image / send_friend_request / remove_friend / create_instance / invite_myself / open_world / rate_world / mark_world_visited / add_to_backlog / get_backlog / remove_from_backlog / recommend_worlds / favorite_world / get_favorite_friends_locations / recommend_join / set_join_preference / get_join_preference / record_join_choice / get_join_learning / x_world_digest / x_scan_creators / x_creators / x_add_creator / x_remove_creator / x_worlds / get_my_favorite_worlds / get_my_favorite_groups 等，完整清单与参数见 `skills/vrc-monitor-agent/SKILL.md`「MCP 工具」章节），Hermes Agent 可直接调用，无需 curl 手写 JSON-RPC。
+服务通过 MCP 协议暴露以下工具（get_online_friends / get_friend_info / get_friend_events / get_companions / get_friend_pair_screen / get_friend_pair_meeting / get_online_pattern / get_nicknames / set_nickname / get_world_name / get_worlds_by_author / set_world_note / get_world_history / get_weekly_report / scan_new_worlds / get_new_worlds / get_mutual_friends / search_users / search_groups / search_worlds / search_planet_worlds / recommend_planet_worlds / search_booth_items / get_booth_item / get_booth_history / get_booth_searches / backup_database / get_user_groups / get_group_info / get_group_instances / get_group_announcement / get_group_heat / join_group / leave_group / peek_group_announcement / send_boop / get_boop_emojis / upload_emoji / upload_print / upload_gallery_image / download_print / download_gallery_image / send_friend_request / remove_friend / create_instance / invite_myself / open_world / rate_world / mark_world_visited / add_to_backlog / get_backlog / remove_from_backlog / recommend_worlds / favorite_world / get_favorite_friends_locations / recommend_join / set_join_preference / get_join_preference / record_join_choice / get_join_learning / x_world_digest / x_scan_creators / x_creators / x_add_creator / x_remove_creator / x_worlds / get_my_favorite_worlds / get_my_favorite_groups / get_friend_favorite_groups / favorite_friend / unfavorite_friend / move_friend_group / submit_totp / get_notifications / see_notification / hide_notification / accept_friend_request / decline_friend_request / get_friend_profile_changes 等，完整清单与参数见 `skills/vrc-monitor-agent/SKILL.md`「MCP 工具」章节），Hermes Agent 可直接调用，无需 curl 手写 JSON-RPC。
 
 在 Hermes 配置文件（`$HERMES_HOME/config.yaml`，Windows 为 `%LOCALAPPDATA%\hermes\config.yaml`）中添加：
 
@@ -167,6 +174,7 @@ cp -r skills/vrchat-world-queries "$HERMES_HOME/skills/"
 cp -r skills/vrchat-group-queries "$HERMES_HOME/skills/"
 cp -r skills/booth-query-display "$HERMES_HOME/skills/"
 cp -r skills/vrchat-assistant-development "$HERMES_HOME/skills/"
+cp -r skills/review-workflow "$HERMES_HOME/skills/"
 ```
 
 | Skill | 用途 | 何时需要 |
@@ -177,6 +185,7 @@ cp -r skills/vrchat-assistant-development "$HERMES_HOME/skills/"
 | `vrchat-group-queries` | 群组域工作流：群组查询/公告 403 分诊/join/leave/peek | 群组查询与操作 |
 | `booth-query-display` | BOOTH 素材检索工具（搜索/详情/热度/汉化/格式化展示） | BOOTH 素材查询 |
 | `vrchat-assistant-development` | **开发规范**：新增 MCP 工具三件套流程、跨平台约束、提交 PR 要求（DEVELOPMENT.md 的 skill 化） | **给本仓库添加/修改功能、提交 PR 时必装** |
+| `review-workflow` | **审核工作流**：REST-only 审查、端到端实测、分级反馈、多轮复核、PR/issue 审核、协作审核参与（AGENT-REVIEW） | **审核 PR / issue、判断可合并性/可关闭性、参与协作审核时加载** |
 
 重启 Hermes 会话生效。skill 说明见 `skills/vrc-monitor-agent/SKILL.md`（README「文档导航」有入口）。
 
@@ -233,9 +242,50 @@ Agent 在配置、使用、维护本软件过程中，若发现原始代码存�
 2. 若自动推断的 IMAP 服务器不正确，可在 `credentials.json` 中添加 `"imap_host"` 手动指定（如 `"imap_host": "imap.gmail.com"`）
 3. 连续多次触发 OTP 时，邮箱 IMAP 同步可能有延迟，服务会在冷却后自动重试（认证失败冷却 120s，限流 401 冷却 5min），无需人工干预
 
+### TOTP（Authenticator 验证码）登录
+
+VRChat 账号启用 **TOTP 两步验证**（Authenticator 应用）时，支持**自动重新登录**：
+
+- **配置 `totp_secret`（推荐，全自动）**：在 `credentials.json` 中新增 `totp_secret` 字段，填入 Authenticator 应用的 otpauth:// URI 或 base32 密钥（登录 VRChat 官网 → 安全设置 → 2FA 重新配置时显示，或从 Authenticator 应用导出）。服务在启动登录、运行期 API 401 自动重认证、WS 重连时，都会用 RFC 6238 本地生成验证码自动完成登录（自动尝试前后窗口容错时钟漂移/窗口轮换），**全程无需人工干预**。`/health` 的 `auth.totpAutoEnabled` 为 `true` 表示已启用自动 TOTP。
+- **未配置 `totp_secret`（手动兜底）**：以下情况会进入 `needsTotp` 状态（`/health` 的 `auth.needsTotp` 为 `true`，或日志提示调用 `submit_totp`）：
+  - 服务启动 / WS 重连：cookie 过期、自动重登录发现需要 2FA，且邮箱 OTP 不可用（未启用或抓取失败）；
+  - 服务运行中 API 返回 401（运行期 cookie 过期）：服务检测到 401 会自动触发重新登录，若需要 TOTP 同样进入 `needsTotp` 状态——**无需重启服务**。
+
+手动提交流程：
+1. 服务已保留待验证的临时会话，**只差验证码**；
+2. Agent（或用户）打开 Authenticator 应用查看当前 6 位验证码；
+3. 调用 MCP 工具 `submit_totp { code: "123456" }` 完成登录，WebSocket 会自动重连上线。
+
+注意：
+- 账号**同时启用邮箱 OTP 与 TOTP** 时，自动通道优先级：邮箱 OTP 抓取 → 自动 TOTP 兜底 → 手动 `submit_totp`；
+- 账号**仅启用 TOTP** 且已配置 `totp_secret` 时，服务自动生成验证码登录，不进入 `needsTotp`；
+- 自动 TOTP 提交失败（验证码被拒 / secret 有误）会冷却 30 秒等待下一个 TOTP 窗口后自动重试，并转为 `needsTotp` 状态供手动兜底；`totp_secret` 解析失败时启动会告警并回退手动模式，不阻断服务；
+- 验证码每 30 秒变化；`totp_secret` 与密码同等敏感（存 `credentials.json`，已被 .gitignore 排除），严禁泄露；
+- 运行期 401 自动重登录失败（非 TOTP 原因，如网络/凭据错误）会冷却 60 秒再重试，不会高频刷认证接口。
+
+### 登录状态主动通知（issue #69）
+
+服务是无人值守的后台进程，登录结果默认只写日志。可配置**主动通知**，在「需要人工介入 / 异常」时提醒宿主（正常自动登录成功不通知，避免噪音）：
+
+- **配置**：复制 `notify-config.example.json` 为 `notify-config.json`（已被 .gitignore 排除），设置 `enabled: true`。
+- **通道**：`channels` 数组支持 `desktop`（Linux `notify-send` / macOS `osascript` / Windows PowerShell toast）与 `webhook`（POST JSON 到 `webhook_url`，群机器人/push 服务）。桌面通知依赖系统通知守护（如 Linux dunst/mako），无守护时静默降级不崩服务。
+- **触发事件**：进入 `needsTotp` 待验证、邮箱 OTP 抓取失败、运行期 401 自动重认证失败、认证恢复（闭合「正常→异常→恢复」循环）。
+- **去抖防刷屏**：`consecutive_fail_threshold`（默认 3）连续失败达此数才通知；`min_interval_sec`（默认 300）同类型通知最小间隔。
+- **默认关闭**：缺文件或 `enabled:false` 时完全不通知，不影响服务。
+- 配置示例：
+  ```json
+  { "enabled": true, "channels": ["desktop", "webhook"],
+    "webhook_url": "https://example.com/hook",
+    "consecutive_fail_threshold": 3, "min_interval_sec": 300 }
+  ```
+
 ### 代理说明
 
 如需通过代理访问 VRChat API，请在启动前设置 `HTTPS_PROXY` 或 `HTTP_PROXY` 环境变量。WebSocket 连接默认直连，6 秒超时后自动回退到代理（默认 `127.0.0.1:7892`，可用 `VRC_MONITOR_WS_PROXY` 环境变量覆盖）。
+
+### 端口 8799 被占用 / 提示双实例
+
+服务启动前会预检 8799 端口：已被占用时立即退出并提示排查命令（`netstat -ano | findstr 8799` / `tasklist | findstr node`），防止新旧两个实例并存。两个实例同时运行会**互抢 OTP 验证码**（实例 A 提交成功、实例 B 提交失败 → VRChat 重复下发新验证码 → 邮箱被验证码邮件刷屏）。重启服务前请确认旧 node 进程已结束。
 
 ### 服务目录找不到
 

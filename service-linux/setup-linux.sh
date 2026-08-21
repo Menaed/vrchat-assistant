@@ -87,10 +87,26 @@ echo "      python:   ${PYTHON_BIN:-未找到} | python3: ${PYTHON3_BIN:-未找�
 
 # ── 生成单元文件（模板 → 烘焙真实路径；bash 参数替换为字面替换，无需转义）──
 unit="$(<"$TEMPLATE")"
-unit="${unit//'%h/vrchat-assistant'/$REPO_DIR}"
+# ExecStart 单独组装：node 与仓库路径含空格时 systemd 按空白拆分参数会截断，
+# 需对含空格 token 加引号（无空格时保持模板原样，便于阅读/排查）。
+# env 模式（node 不在 PATH）下 /usr/bin/env node 是两个独立 token，
+# 只能对路径加引号，绝不能整体加引号（否则被当单个可执行文件路径导致启动失败）
+main_arg="$REPO_DIR/start-monitor.js"
 if [[ -n "$NODE_BIN" ]]; then
-  unit="${unit//'/usr/bin/env node'/$NODE_BIN}"
+  if [[ "$NODE_BIN" == *" "* || "$main_arg" == *" "* ]]; then
+    exec_line="ExecStart=\"$NODE_BIN\" \"$main_arg\""
+  else
+    exec_line="ExecStart=$NODE_BIN $main_arg"
+  fi
+else
+  if [[ "$main_arg" == *" "* ]]; then
+    exec_line="ExecStart=/usr/bin/env node \"$main_arg\""
+  else
+    exec_line="ExecStart=/usr/bin/env node $main_arg"
+  fi
 fi
+unit="${unit//'ExecStart=/usr/bin/env node %h/vrchat-assistant/start-monitor.js'/$exec_line}"
+unit="${unit//'%h/vrchat-assistant'/$REPO_DIR}"
 # PATH 无 python 但存在 python3：解除注释并注入 VRC_MONITOR_PYTHON，
 # 否则 OTP 自动登录失败会陷入重试循环（AGENTS.md 环境变量章节明确要求）
 if [[ -z "$PYTHON_BIN" && -n "$PYTHON3_BIN" ]]; then

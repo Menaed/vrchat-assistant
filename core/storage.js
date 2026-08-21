@@ -102,6 +102,17 @@ export class Storage {
     }
     // 迁移：历史 tags='' 脏数据统一为 '[]'（json_each 对空串抛 malformed JSON，Review R2）
     this._run(`UPDATE world_kb SET tags = '[]' WHERE tags IS NULL OR tags = ''`);
+    // 迁移：旧库 friends 缺 bio/user_icon/pronouns 列（friend-profile 变更追踪用，幂等）
+    const friendCols = this._query(`PRAGMA table_info(friends)`);
+    if (!friendCols.some(c => c.name === 'bio')) {
+      this._run(`ALTER TABLE friends ADD COLUMN bio TEXT`);
+    }
+    if (!friendCols.some(c => c.name === 'user_icon')) {
+      this._run(`ALTER TABLE friends ADD COLUMN user_icon TEXT`);
+    }
+    if (!friendCols.some(c => c.name === 'pronouns')) {
+      this._run(`ALTER TABLE friends ADD COLUMN pronouns TEXT`);
+    }
     return this;
   }
 
@@ -253,46 +264,67 @@ export class Storage {
   // ── 好友状态 ──
 
   upsertFriend(friend) {
-    const params = {
-      $userId: friend.userId,
-      $displayName: friend.displayName || '',
-      $memo: friend.memo ?? null,
-      $trustLevel: friend.trustLevel ?? null,
-      $isOnline: friend.isOnline ? 1 : 0,
-      $location: friend.location || '',
-      $worldId: friend.worldId || '',
-      $worldName: friend.worldName || '',
-      $platform: friend.platform || '',
-      $status: friend.status || '',
-      $statusDescription: friend.statusDescription || '',
-      $avatarImageUrl: friend.avatarImageUrl || '',
-      $lastSeen: friend.lastSeen || '',
-      $lastOnline: friend.lastOnline || '',
-      $lastOffline: friend.lastOffline || '',
+    const userId = friend.userId;
+    // 只更新显式传入的字段：partial upsert（如 friend-location/friend-active 事件只带少数字段）
+    // 不得覆盖未传的 profile 字段。历史 bug（PR #56 审查实测复现）：location 事件穿插会
+    // 把 bio/status/avatar_image_url 等用 '' 覆盖，导致资料变更追踪基线被清空、main 上
+    // status/avatar 数据同源丢失。故按 key 存在性动态构建 SET 子句。
+    const columns = {
+      display_name: 'displayName',
+      memo: 'memo',
+      trust_level: 'trustLevel',
+      is_online: 'isOnline',
+      location: 'location',
+      world_id: 'worldId',
+      world_name: 'worldName',
+      platform: 'platform',
+      status: 'status',
+      status_description: 'statusDescription',
+      avatar_image_url: 'avatarImageUrl',
+      bio: 'bio',
+      user_icon: 'userIcon',
+      pronouns: 'pronouns',
+      last_seen: 'lastSeen',
+      last_online: 'lastOnline',
+      last_offline: 'lastOffline',
+    };
+    const norm = {
+      displayName: v => v || '',
+      memo: v => v ?? null,
+      trustLevel: v => v ?? null,
+      isOnline: v => v ? 1 : 0,
+      location: v => v || '',
+      worldId: v => v || '',
+      worldName: v => v || '',
+      platform: v => v || '',
+      status: v => v || '',
+      statusDescription: v => v || '',
+      avatarImageUrl: v => v || '',
+      bio: v => v || '',
+      userIcon: v => v || '',
+      pronouns: v => v || '',
+      lastSeen: v => v || '',
+      lastOnline: v => v || '',
+      lastOffline: v => v || '',
     };
 
+    const setCols = [];
+    const params = { $userId: userId };
+    for (const [col, key] of Object.entries(columns)) {
+      if (friend[key] === undefined) continue;  // 未传 → 不更新该列
+      params[`$${col}`] = norm[key](friend[key]);
+      setCols.push(`${col}=COALESCE($${col}, ${col})`);
+    }
+    if (setCols.length === 0) return;
+
+    const insCols = ['user_id', ...Object.keys(columns).filter(c => friend[columns[c]] !== undefined)];
+    const insPh = insCols.map(c => c === 'user_id' ? '$userId' : `$${c}`);
+
     this._run(
-      `INSERT INTO friends (user_id, display_name, memo, trust_level, is_online, location,
-        world_id, world_name, platform, status, status_description, avatar_image_url,
-        last_seen, last_online, last_offline)
-       VALUES ($userId, $displayName, $memo, $trustLevel, $isOnline, $location,
-        $worldId, $worldName, $platform, $status, $statusDescription, $avatarImageUrl,
-        $lastSeen, $lastOnline, $lastOffline)
+      `INSERT INTO friends (${insCols.join(', ')})
+       VALUES (${insPh.join(', ')})
        ON CONFLICT(user_id) DO UPDATE SET
-        display_name=COALESCE($displayName, display_name),
-        memo=COALESCE($memo, memo),
-        trust_level=COALESCE($trustLevel, trust_level),
-        is_online=COALESCE($isOnline, is_online),
-        location=COALESCE($location, location),
-        world_id=COALESCE($worldId, world_id),
-        world_name=COALESCE($worldName, world_name),
-        platform=COALESCE($platform, platform),
-        status=COALESCE($status, status),
-        status_description=COALESCE($statusDescription, status_description),
-        avatar_image_url=COALESCE($avatarImageUrl, avatar_image_url),
-        last_seen=COALESCE($lastSeen, last_seen),
-        last_online=COALESCE($lastOnline, last_online),
-        last_offline=COALESCE($lastOffline, last_offline),
+        ${setCols.join(', ')}${setCols.length ? ',' : ''}
         updated_at=datetime('now')`,
       params
     );
@@ -309,6 +341,41 @@ export class Storage {
   getFriend(userId) {
     const rows = this._query(`SELECT * FROM friends WHERE user_id = $userId`, { $userId: userId });
     return rows[0] || null;
+  }
+
+  // 好友资料变更历史（friend-profile 变更追踪，2026-08-19 新增）
+  // 查询 events 表中 content_json.type 为 avatar/status/bio/user_icon/pronouns 的记录。
+  // 与 VRCX 迁移脚本（feed_avatar/feed_status/feed_bio）写入格式一致：顶层 type='friend-update'，
+  // 实际变更类型在 content_json.type 里。types 参数逗号分隔过滤（默认全部）。
+  getFriendProfileChanges(userId, { limit = 50, offset = 0, types } = {}) {
+    const validTypes = ['avatar', 'status', 'bio', 'user_icon', 'pronouns'];
+    let typesArr = validTypes;
+    if (types) {
+      typesArr = String(types).split(',').map(t => t.trim()).filter(t => validTypes.includes(t));
+      if (typesArr.length === 0) typesArr = validTypes;
+    }
+    const params = { $limit: limit, $offset: offset };
+    const placeholders = typesArr.map((t, i) => { params[`$t${i}`] = t; return `$t${i}`; }).join(',');
+    let sql = `SELECT * FROM events WHERE type = 'friend-update'
+               AND json_extract(content_json, '$.type') IN (${placeholders})`;
+    if (userId) { sql += ` AND user_id = $userId`; params.$userId = userId; }
+    sql += ` ORDER BY created_at DESC LIMIT $limit OFFSET $offset`;
+    return this._query(sql, params);
+  }
+
+  getFriendProfileChangeCount(userId, { types } = {}) {
+    const validTypes = ['avatar', 'status', 'bio', 'user_icon', 'pronouns'];
+    let typesArr = validTypes;
+    if (types) {
+      typesArr = String(types).split(',').map(t => t.trim()).filter(t => validTypes.includes(t));
+      if (typesArr.length === 0) typesArr = validTypes;
+    }
+    const params = {};
+    const placeholders = typesArr.map((t, i) => { params[`$t${i}`] = t; return `$t${i}`; }).join(',');
+    let sql = `SELECT COUNT(*) n FROM events WHERE type = 'friend-update'
+               AND json_extract(content_json, '$.type') IN (${placeholders})`;
+    if (userId) { sql += ` AND user_id = $userId`; params.$userId = userId; }
+    return this._query(sql, params)[0].n;
   }
 
   searchFriends(query) {
@@ -793,7 +860,7 @@ export class Storage {
 
   // ── 新增：查找同屏好友 ──
 
-  findCompanions(userId, startTime, endTime) {
+  findCompanions(userId, startTime, endTime, includeTimeline = false) {
     // 1. 获取目标用户的时间范围内所有 location 事件
     //    - 查自己：user-location（自己的位置事件）
     //    - 查好友：friend-location（好友的位置事件）
@@ -805,8 +872,10 @@ export class Storage {
     );
 
     // 2. 提取用户去过的所有 unique instanceId
+    //    默认不组装 userTimeline（全量位置事件可能数百上千条，导致 MCP 输出过大被截断），
+    //    仅在 includeTimeline=true 时才收集，满足需要逐条查看位置明细的场景。
     const userInstances = new Set();
-    const userTimeline = [];
+    const userTimeline = includeTimeline ? [] : null;
     for (const ev of userEvents) {
       let location = '';
       try {
@@ -821,16 +890,18 @@ export class Storage {
           userInstances.add(instanceId);
           userInstances.add(`${worldId}:${instanceId}`);
         }
-        userTimeline.push({
-          id: ev.id,
-          created_at: ev.created_at,
-          type: ev.type,
-          world_id: worldId,
-          instance_id: instanceId,
-          world_name: ev.world_name || '',
-          content_json: ev.content_json,
-        });
-      } else {
+        if (includeTimeline) {
+          userTimeline.push({
+            id: ev.id,
+            created_at: ev.created_at,
+            type: ev.type,
+            world_id: worldId,
+            instance_id: instanceId,
+            world_name: ev.world_name || '',
+            content_json: ev.content_json,
+          });
+        }
+      } else if (includeTimeline) {
         userTimeline.push({
           id: ev.id,
           created_at: ev.created_at,
@@ -906,10 +977,181 @@ export class Storage {
       userId,
       timeRange: { start: startTime, end: endTime },
       userInstanceCount: userInstances.size,
-      userTimeline,
+      userTimeline: userTimeline || [],
       companionCount: companions.length,
       companions,
     };
+  }
+
+  // ── 新增：查询两个好友（任意第三方）之间的同屏次数与时长 ──
+  //
+  // 精确口径（时间窗口 + 可识别实例）：
+  //   friend-location 是位置快照事件，无法可靠重建「在场区间」。改为：
+  //   对好友 B 的每条有效实例事件，找好友 A 在「同一实例」且时间戳在 ±window
+  //   内的匹配事件对，作为一次同屏。
+  //   排除 offline/traveling/private —— private 无房主信息，不同人不同时间的
+  //   private 会被误判为同一房间（实测坑），故不计。
+  //   limit 仅限制返回的 matches 条数，不改变 matchCount/总时长的统计口径。
+  findFriendPairScreen(userIdA, userIdB, startTime, endTime, windowMinutes = 30, limit = null) {
+    const { pairs, instRanges } = this._collectPairScreen(userIdA, userIdB, startTime, endTime, windowMinutes);
+
+    // 按世界拆分时长：同一 world 的实例时长求和（段首到段尾，不断开）
+    const worldNames = this._resolveWorldNames([...new Set(pairs.map(p => p.world_id))]);
+    const worldMinutes = new Map();
+    let totalSeconds = 0;
+    for (const [, range] of instRanges) {
+      const secs = Math.max(0, (range.max - range.min) / 1000);
+      totalSeconds += secs;
+      const wname = worldNames.get(range.world_id) || range.world_id;
+      worldMinutes.set(wname, (worldMinutes.get(wname) || 0) + secs / 60);
+    }
+    const worldDuration = [...worldMinutes.entries()]
+      .map(([world, minutes]) => ({ world, minutes: Math.round(minutes * 10) / 10 }))
+      .sort((a, b) => b.minutes - a.minutes);
+
+    const worlds = [...worldNames.values()].filter(Boolean);
+    const limited = limit ? pairs.slice(0, limit) : pairs;
+    const matches = limited.map(p => ({ ...p, world_name: worldNames.get(p.world_id) || '' }));
+
+    const names = this._getDisplayNames([userIdA, userIdB]);
+
+    return {
+      userIdA,
+      userIdB,
+      displayNameA: names[userIdA],
+      displayNameB: names[userIdB],
+      timeRange: { start: startTime, end: endTime },
+      windowMinutes,
+      matchCount: pairs.length,
+      totalSeconds: Math.round(totalSeconds),
+      totalMinutes: Math.round(totalSeconds / 60 * 10) / 10,
+      worldDuration,
+      worlds: [...worlds].filter(Boolean),
+      matches,
+      limit,
+    };
+  }
+
+  // ── 新增：查询两个好友之间的「每次见面」时段（单次见面时长）──
+  //
+  // 按实例切分：同一实例内所有「同屏匹配」事件合并为一次见面，给出段首/段尾/时长。
+  // 复用 _collectPairScreen 的精确匹配口径（同实例 + 时间差 ≤ windowMinutes，
+  // 排除 private/offline/traveling）。
+  findFriendPairMeetings(userIdA, userIdB, startTime, endTime, windowMinutes = 30) {
+    const { instRanges } = this._collectPairScreen(userIdA, userIdB, startTime, endTime, windowMinutes);
+
+    const meetings = [...instRanges.entries()].map(([key, range]) => {
+      const worldId = key.split(':')[0];
+      const instanceId = key.slice(worldId.length + 1);
+      return {
+        worldId,
+        instanceId,
+        startTime: new Date(range.min).toISOString(),
+        endTime: new Date(range.max).toISOString(),
+        durationMinutes: Math.round((range.max - range.min) / 60000),
+      };
+    });
+    meetings.sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
+
+    return {
+      userIdA,
+      userIdB,
+      meetingCount: meetings.length,
+      totalDurationSeconds: meetings.reduce((s, m) => s + m.durationMinutes * 60, 0),
+      meetings,
+    };
+  }
+
+  // ── 公共 helper：好友对同屏匹配收集（get_friend_pair_screen / get_friend_pair_meeting 共用）──
+  // 返回 { pairs, instRanges }：
+  //   pairs      所有匹配事件对（B 事件 × A 同实例接近事件），按 bt 升序
+  //   instRanges 每实例的段首(min)/段尾(max)/world_id（段首到段尾，不断开）
+  _collectPairScreen(userIdA, userIdB, startTime, endTime, windowMinutes = 30) {
+    const getEvents = (uid) => this._query(
+      `SELECT created_at, json_extract(content_json, '$.location') AS loc FROM events
+       WHERE user_id = $u AND type = 'friend-location'
+       AND created_at >= $start AND created_at <= $end`,
+      { $u: uid, $start: startTime, $end: endTime }
+    );
+
+    const parse = (loc) => {
+      if (!loc || loc === 'offline' || loc === 'traveling') return null;
+      const parts = loc.split(':');
+      const worldId = parts[0];
+      const instanceId = parts.slice(1).join(':');
+      // private 无房主标识，无法判定是否同一房间，排除
+      if (instanceId === 'private') return null;
+      if (!worldId || !instanceId) return null;
+      return { world_id: worldId, instance_id: instanceId };
+    };
+
+    const winMs = Math.max(1, windowMinutes) * 60000;
+    const aEvents = getEvents(userIdA).map(r => ({ t: r.created_at, ...(parse(r.loc) || {}) })).filter(e => e.world_id);
+    const bEvents = getEvents(userIdB).map(r => ({ t: r.created_at, ...(parse(r.loc) || {}) })).filter(e => e.world_id);
+
+    const aByInst = new Map();
+    for (const e of aEvents) {
+      const k = `${e.world_id}:${e.instance_id}`;
+      if (!aByInst.has(k)) aByInst.set(k, []);
+      aByInst.get(k).push(e.t);
+    }
+
+    const pairs = [];
+    const instRanges = new Map(); // key -> { world_id, instance_id, min, max }
+    const seen = new Set();
+    for (const be of bEvents) {
+      const k = `${be.world_id}:${be.instance_id}`;
+      const ats = aByInst.get(k);
+      if (!ats) continue;
+      const bt = Date.parse(be.t);
+      for (const at of ats) {
+        if (Math.abs(Date.parse(at) - bt) > winMs) continue;
+        const pairId = `${be.t}|${at}`;
+        if (seen.has(pairId)) continue;
+        seen.add(pairId);
+        pairs.push({ at, bt: be.t, world_id: be.world_id, instance_id: be.instance_id });
+        const tA = Date.parse(at);
+        const cur = instRanges.get(k) || { world_id: be.world_id, instance_id: be.instance_id, min: Infinity, max: -Infinity };
+        cur.min = Math.min(cur.min, tA, bt);
+        cur.max = Math.max(cur.max, tA, bt);
+        instRanges.set(k, cur);
+      }
+    }
+    pairs.sort((a, b) => (a.bt < b.bt ? -1 : 1));
+
+    return { pairs, instRanges };
+  }
+
+  // ── 公共 helper：批量解析世界名（避免 N+1）──
+  _resolveWorldNames(worldIds) {
+    const out = new Map();
+    const ids = [...new Set(worldIds.filter(Boolean))];
+    if (ids.length === 0) return out;
+    const ph = ids.map((_, i) => `$w${i}`).join(',');
+    const params = {};
+    ids.forEach((w, i) => { params[`$w${i}`] = w; });
+    const rows = this._query(
+      `SELECT world_id, world_name FROM events WHERE world_id IN (${ph}) AND world_name != ''
+       GROUP BY world_id, world_name ORDER BY MAX(created_at) DESC`,
+      params
+    );
+    for (const r of rows) {
+      if (!out.has(r.world_id)) out.set(r.world_id, r.world_name);
+    }
+    return out;
+  }
+
+  // ── 公共 helper：批量解析显示名（最近一条）──
+  _getDisplayNames(userIds) {
+    const out = {};
+    for (const uid of userIds) {
+      const rows = this._query(
+        `SELECT display_name FROM events WHERE user_id = $uid AND display_name != '' ORDER BY created_at DESC LIMIT 1`,
+        { $uid: uid }
+      );
+      out[uid] = rows.length ? rows[0].display_name : '';
+    }
+    return out;
   }
 
   // ── 新增：分析好友上线规律 ──

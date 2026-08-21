@@ -22,7 +22,9 @@ export function handleGetServerStatus() {
   return {
     status: 'running',
     startedAt: serverState.started,
-    authenticated: !!serverState.authUser,
+    // needsTotp 状态（运行期 401 需 TOTP）时账号并未真正登录，需报 authenticated:false（issue #59）
+    authenticated: !!serverState.authUser && !serverState.needsTotp,
+    needsTotp: serverState.needsTotp,
     user: serverState.authUser,
     dbEvents: storage.getStats().events,
     dbFriends: storage.getStats().friends,
@@ -286,11 +288,11 @@ export function handleRemoveFromWatchlist({ userId }) {
   return { success: true, userId };
 }
 
-export function handleGetCompanions({ startTime, endTime, userId }) {
+export function handleGetCompanions({ startTime, endTime, userId, includeTimeline }) {
   const { storage, serverState } = ctx;
   const targetUserId = userId || serverState.authUser?.id;
   if (!targetUserId) throw new Error('No userId provided and not authenticated');
-  return storage.findCompanions(targetUserId, startTime, endTime);
+  return storage.findCompanions(targetUserId, startTime, endTime, includeTimeline === true);
 }
 
 export function handleGetOnlinePattern({ userId, days, startTime, endTime }) {

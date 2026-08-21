@@ -11,6 +11,8 @@
  */
 import WebSocket from 'ws';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { ctx } from './server-context.js';
+import { notifier } from './notifier.js';
 
 // WS 代理地址：优先 VRC_MONITOR_WS_PROXY，其次标准 HTTPS_PROXY/HTTP_PROXY，最后内置默认（兼容旧部署）
 // 注意：代理可能含凭据，日志中不要打印完整 URL
@@ -107,15 +109,24 @@ export class WsManager {
       try {
         await this.api.ensureAuth();
       } catch (authErr) {
-        if (authErr.needsOtp && this.otpFetcher) {
-          console.log('[WS] ⚠️ 认证需要 OTP，尝试自动获取...');
+        // 自动 2FA 通道：邮箱 OTP（otpFetcher）或 TOTP（api.totpFetcher，配置 totp_secret 后启用）
+        if (authErr.needsOtp && (this.otpFetcher || this.api.totpFetcher)) {
+          console.log('[WS] ⚠️ 认证需要 2FA，尝试自动获取...');
           try {
             await this.api.ensureAuthWithAutoOtp(this.otpFetcher);
           } catch (otpErr) {
+            if (otpErr.needsTotp) {
+              ctx.serverState.needsTotp = true;
+              console.log('[WS] 🔑 账号需要 TOTP 验证码：自动登录未成功，可调用 MCP 工具 submit_totp 提交');
+              notifier.notifyAuth('needsTotp', '账号需要 TOTP 验证码，服务暂停——请调用 submit_totp 提交当前验证码');
+            } else {
+              notifier.notifyAuth('reauthFailed', `WS 重连自动认证失败：${otpErr.message}`);
+            }
             this._setAuthCooldown(otpErr);
             throw otpErr;
           }
         } else {
+          notifier.notifyAuth('reauthFailed', `WS 重连认证失败：${authErr.message}`);
           this._setAuthCooldown(authErr);
           throw authErr;
         }
@@ -123,6 +134,10 @@ export class WsManager {
 
       // 认证成功，重置冷却
       this.authCooldownUntil = 0;
+      if (ctx.serverState.needsTotp) {
+        ctx.serverState.needsTotp = false;
+        notifier.notifyAuth('recovered', 'TOTP 认证完成，服务已恢复正常');
+      }
 
       // 2. 获取 WebSocket token
       const authResp = await this.api._request('GET', '/auth');

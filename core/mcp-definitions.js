@@ -310,6 +310,19 @@ export const CUSTOM_TOOLS = [
     },
   },
 {
+    name: 'get_friend_profile_changes',
+    description: '[query·资料] 好友资料变更历史（Avatar/Bio/状态/头像图标/代词）：事件管道实时采集 friend-update 的 user 对象 diff 落库，与 VRCX 迁移的 feed_avatar/feed_status/feed_bio 同 type 打通。userId 可选（省略=全部好友）；types 逗号分隔过滤（avatar/status/bio/user_icon/pronouns，默认全部）；limit(1-200)/offset 分页。返回每条 { userId, displayName, changeType, source, createdAt, change:{当前值, 旧值} }。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: 'Friend ID (usr_...). Omit to query all friends' },
+        limit: { type: 'number', default: 50, description: 'Max rows (1-200, default 50)' },
+        offset: { type: 'number', default: 0 },
+        types: { type: 'string', description: 'Comma-separated change types: avatar/status/bio/user_icon/pronouns (default all)' },
+      },
+    },
+  },
+{
     name: 'get_world_name',
     description: '[query] Get world name by worldId. Checks local cache first, falls back to API.',
     inputSchema: {
@@ -319,6 +332,19 @@ export const CUSTOM_TOOLS = [
         forceRefresh: { type: 'boolean', description: 'Force refresh from API' },
       },
       required: ['worldId'],
+    },
+  },
+{
+    name: 'get_worlds_by_author',
+    description: '[query] List worlds published by a single author, up to limit (default 100, max 500) — 通过作者 ID/作者名列出该作者的世界（最多 limit 张，默认 100，上限 500）. Resolves authorId by authorName via /users?search when authorName given, then lists worlds via GET /worlds?userId=<authorId> with offset pagination until exhausted or limit reached.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        authorId: { type: 'string', description: 'Author user ID (usr_...). Mutually exclusive with authorName.' },
+        authorName: { type: 'string', description: 'Author display name — resolved to authorId via user search. Mutually exclusive with authorId.' },
+        limit: { type: 'number', default: 100, description: 'Max worlds to return (1-500, default 100)' },
+      },
+      required: [],
     },
   },
 {
@@ -472,15 +498,49 @@ export const CUSTOM_TOOLS = [
   },
 {
     name: 'get_companions',
-    description: '[query] Find all friends who were in the same instances as you during a time range. Uses SQLite cross-reference by instanceId. Each companion has: userId/displayName/firstSeen/lastSeen/matchCount/worlds (worlds is a STRING array of world names or worldIds, NOT objects).',
+    description: '[query] Find all friends who were in the same instances as you during a time range. Uses SQLite cross-reference by instanceId. Each companion has: userId/displayName/firstSeen/lastSeen/matchCount/worlds (worlds is a STRING array of world names or worldIds, NOT objects). By default userTimeline is omitted (empty array) to avoid huge MCP output when the range spans many location events; pass includeTimeline=true to include the full per-event location timeline.',
     inputSchema: {
       type: 'object',
       properties: {
         startTime: { type: 'string', description: 'Start time (ISO 8601, UTC recommended, e.g. 2026-07-25T11:00:00Z)' },
         endTime: { type: 'string', description: 'End time (ISO 8601, UTC)' },
         userId: { type: 'string', description: 'Optional: override userId. Defaults to current user.' },
+        includeTimeline: { type: 'boolean', description: 'Optional: include the full user location timeline (default false to avoid oversized output).' },
       },
       required: ['startTime', 'endTime'],
+    },
+  },
+{
+    name: 'get_friend_pair_meeting',
+    description: '[query] 查询两个好友（任意第三方）之间「每次见面」的时段与时长（单次见面分析）。按实例切分：同一实例内所有同屏匹配事件合并为一次见面，返回每次的 start/end/durationMinutes、世界与实例；同时给出 meetingCount（见面次数）与 totalDurationSeconds（总时长）。精确口径：B 的每条可识别实例事件匹配 A 同一实例且时间差 ≤ windowMinutes → 计同屏；排除 offline/traveling/private（private 无房主信息无法判定同房）。startTime/endTime 与 days 二选一，windowMinutes 默认 30。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userIdA: { type: 'string', description: '好友 A 的 userId（usr_...），必填' },
+        userIdB: { type: 'string', description: '好友 B 的 userId（usr_...），必填' },
+        startTime: { type: 'string', description: '起始时间（ISO 8601 UTC），与 endTime 成对' },
+        endTime: { type: 'string', description: '结束时间（ISO 8601 UTC），与 startTime 成对' },
+        days: { type: 'number', description: '回溯天数（默认 30），未给 startTime/endTime 时生效' },
+        windowMinutes: { type: 'number', description: '同屏判定时间窗口（分钟，默认 30）' },
+      },
+      required: ['userIdA', 'userIdB'],
+    },
+  },
+{
+    name: 'get_friend_pair_screen',
+    description: '[query] 查询两个好友（任意第三方）之间的同屏次数与时长（共玩/同房分析）。精确口径：对好友 B 的每条可识别实例事件，找好友 A 在同一实例且时间戳在 ±windowMinutes 内的匹配，计为一次同屏；排除 offline/traveling/private（private 无房主信息无法判定同房）。不同时间去过同一房间不计。返回 matchCount（次数）、totalMinutes/totalSeconds（总同屏时长，段首到段尾累加，含实例内中途断开空档）、worldDuration（按世界拆分时长）、worlds（共现世界）与 matches（匹配事件对，默认全量，可用 limit 限制条数——采样密集时 matches 可能上千条）。startTime/endTime 与 days 二选一，windowMinutes 默认 30。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userIdA: { type: 'string', description: '好友 A 的 userId（usr_...），必填' },
+        userIdB: { type: 'string', description: '好友 B 的 userId（usr_...），必填' },
+        startTime: { type: 'string', description: '起始时间（ISO 8601 UTC），与 endTime 成对' },
+        endTime: { type: 'string', description: '结束时间（ISO 8601 UTC），与 startTime 成对' },
+        days: { type: 'number', description: '回溯天数（默认 30），未给 startTime/endTime 时生效' },
+        windowMinutes: { type: 'number', description: '同屏判定时间窗口（分钟，默认 30）：同一实例内双方事件时间差 ≤ 该值即视为同屏' },
+        limit: { type: 'number', description: '仅限制返回的 matches 条数（默认全量），不影响 matchCount/总时长统计' },
+      },
+      required: ['userIdA', 'userIdB'],
     },
   },
 {
@@ -873,5 +933,124 @@ export const CUSTOM_TOOLS = [
     name: 'get_my_favorite_groups',
     description: '[查询·收藏] 列出当前账号的世界收藏分组（收藏夹名，含容量上限 capacity）。',
     inputSchema: { type: 'object', properties: {} },
+  },
+  // ── 认证 ──
+  {
+    name: 'submit_totp',
+    description: '[认证] 提交 TOTP 验证码完成登录。在 credentials.json 配置 totp_secret 后，服务会自动生成验证码登录（无需调用本工具）；本工具仅在自动登录失败（验证码被拒/secret 有误）时作为手动兜底。处于 needsTotp 状态（/health 可见）时调用本工具提交当前 Authenticator 应用的 6 位验证码。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Authenticator 应用中显示的 6 位 TOTP 验证码' },
+      },
+      required: ['code'],
+    },
+  },
+  // ── 好友收藏分组管理（2026-08-19 新增）──
+  {
+    name: 'get_friend_favorite_groups',
+    description: '[query·收藏] 列出好友收藏分组（分组名 + 显示名 + 成员数）。数据来自 GET /favorite/groups?type=friend + GET /favorites?type=friend。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'favorite_friend',
+    description: '[write·收藏] 把好友加入收藏分组（POST /favorites type=friend）。groupId/displayName 二选一；groupName 必填（显示名或分组名，可用 get_friend_favorite_groups 查看）。须已是好友（403 返回 not friends）；重复收藏返回 already favorited（不抛错）。写操作，confirm: true 才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: 'Friend user id (usr_...) — mutually exclusive with displayName' },
+        displayName: { type: 'string', description: 'Exact display name to search and favorite — mutually exclusive with userId' },
+        groupName: { type: 'string', description: 'Target favorite group name or displayName (required)' },
+        confirm: { type: 'boolean', description: 'Must be true to actually favorite. Default false returns preview only.' },
+      },
+      required: ['groupName'],
+    },
+  },
+  {
+    name: 'unfavorite_friend',
+    description: '[write·收藏] 从收藏分组移除好友（DELETE /favorites/{记录id}，可逆）。groupId/displayName 二选一；groupName 可选（省略 = 从全部分组移除）。写操作，confirm: true 才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: 'Friend user id (usr_...) — mutually exclusive with displayName' },
+        displayName: { type: 'string', description: 'Exact display name to search and unfavorite — mutually exclusive with userId' },
+        groupName: { type: 'string', description: 'Favorite group to remove from (optional; omit = remove from all groups)' },
+        confirm: { type: 'boolean', description: 'Must be true to actually unfavorite. Default false returns preview only.' },
+      },
+    },
+  },
+  {
+    name: 'move_friend_group',
+    description: '[write·收藏] 移动好友到另一收藏分组（删旧建新，与 VRCX 行为一致；API 无原地更新 tags 端点）。groupId/displayName 二选一；toGroup 必填。写操作，confirm: true 才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: 'Friend user id (usr_...) — mutually exclusive with displayName' },
+        displayName: { type: 'string', description: 'Exact display name to search and move — mutually exclusive with userId' },
+        toGroup: { type: 'string', description: 'Target favorite group name or displayName (required)' },
+        confirm: { type: 'boolean', description: 'Must be true to actually move. Default false returns preview only.' },
+      },
+      required: ['toGroup'],
+    },
+  },
+// ── 通知收件箱（2026-08-19 新增）──
+  {
+    name: 'get_notifications',
+    description: '[query·通知] 通知收件箱：读取当前账号的未读通知（旧 v1 系统）。limit(1-100)/offset 分页；types 逗号分隔过滤（friendRequest/invite/message/boop/requestInvite/votetokick/inviteResponse/requestInviteResponse）；hidden=true 查看已隐藏通知。返回字段：returned（本页 API 实际返回条数）、shown（types 过滤后条数）、hasMore（本页取满 limit 时可能有下一页）、limit/offset。注意：API 的 type 查询参数已废弃不生效，过滤在本地完成；seen/receiverUserId 仅 WebSocket 推送有，REST 不返回。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', default: 30, description: 'Max results (1-100, default 30)' },
+        offset: { type: 'number', default: 0 },
+        types: { type: 'string', description: 'Comma-separated types: friendRequest/invite/message/boop/requestInvite/votetokick (default all)' },
+        hidden: { type: 'boolean', default: false, description: 'List hidden notifications instead of active ones' },
+      },
+    },
+  },
+  {
+    name: 'see_notification',
+    description: '[write·通知] 标记通知为已读。notificationId 必填。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notificationId: { type: 'string', description: 'Notification ID (not_... / frq_...)' },
+      },
+      required: ['notificationId'],
+    },
+  },
+  {
+    name: 'hide_notification',
+    description: '[write·通知] 隐藏/清除一条通知（旧 v1 系统 hide 即删除）。notificationId 必填。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notificationId: { type: 'string', description: 'Notification ID (not_... / frq_...)' },
+      },
+      required: ['notificationId'],
+    },
+  },
+  {
+    name: 'accept_friend_request',
+    description: '[write·社交] 接受好友请求（PUT /auth/user/notifications/{id}/accept）——接受即直接加为好友，不可逆，必须传 confirm: true 才执行，否则只返回预览。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notificationId: { type: 'string', description: 'Friend request notification ID (frq_...)' },
+        confirm: { type: 'boolean', description: 'Must be true to actually accept (adds the user as friend). Default false returns preview only.' },
+      },
+      required: ['notificationId'],
+    },
+  },
+  {
+    name: 'decline_friend_request',
+    description: '[write·社交] 拒绝好友请求（旧 v1 无独立拒绝端点，hide 即清除该通知）。对方不会收到明确拒绝提示，必须传 confirm: true 才执行，否则只返回预览。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notificationId: { type: 'string', description: 'Friend request notification ID (frq_...)' },
+        confirm: { type: 'boolean', description: 'Must be true to actually decline (clears the notification). Default false returns preview only.' },
+      },
+      required: ['notificationId'],
+    },
   },
 ];

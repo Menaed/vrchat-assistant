@@ -27,11 +27,11 @@
 
 ## 快速开始
 
-**前置条件**：Node.js ≥ 18、一个 VRChat 账号（开启邮箱 2FA）、一个支持 IMAP 的邮箱（接收 OTP 验证码）。
+**前置条件**：Node.js ≥ 18、一个 VRChat 账号（开启邮箱 OTP 或 TOTP 两步验证）。仅用邮箱 OTP 登录时才需要支持 IMAP 的邮箱（接收验证码）。
 
-1. 克隆仓库，复制 `credentials.example.json` 为 `credentials.json`，填入 VRChat 账号与邮箱 IMAP 授权码
+1. 克隆仓库，复制 `credentials.example.json` 为 `credentials.json`，填入 VRChat 账号；认证二选一——邮箱 OTP 登录填邮箱 IMAP 授权码，或配置 `totp_secret` 走 TOTP 自动登录
 2. 启动服务：`node start-monitor.js`
-3. 验证：`curl http://127.0.0.1:8799/health` 返回 `Auth: true`、`WS: connected`
+3. 验证：`curl http://127.0.0.1:8799/health` 返回 JSON 中 `auth.authenticated` 为 `true`、`ws.status` 为 `connected`
 
 > 完整的凭据、环境变量、开机自启、插件安装等配置步骤，交给 AI Agent 按 [AGENTS.md](./AGENTS.md) 自动完成即可——你只需要提供账号和验收。
 
@@ -49,7 +49,7 @@
 | [service-windows/](./service-windows/README.md) | Windows 开机自启 + 崩溃自愈 + 每日修复报告（一键脚本） | Windows 常驻运行 |
 | [service-linux/](./service-linux/README.md) | Linux systemd 用户服务：开机自启 + 崩溃自愈 + journal 日志（一键脚本） | Linux 常驻运行 |
 
-**MCP 工具**：服务通过 MCP 暴露工具，覆盖好友查询、社交互动、媒体管理、群组操作、世界推荐、素材检索等能力域。**完整工具清单（全部工具）统一登记在 [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md)「MCP 工具」章节**，Agent 照此调用。其余 skill 为各能力域的工作流补充（不重复登记工具）：`vrchat-social-queries`（社交域：在线五要素/同屏/规律/昵称）、`vrchat-world-queries`（世界域：待逛/推荐/情报挖掘）、`vrchat-group-queries`（群组域：查询/公告分诊）、`booth-query-display`（BOOTH 检索/展示格式）、`vrchat-assistant-development`（开发规范）。
+**MCP 工具**：服务通过 MCP 暴露工具，覆盖好友查询、社交互动、媒体管理、群组操作、世界推荐、素材检索等能力域。**完整工具清单（全部工具）统一登记在 [skills/vrc-monitor-agent/SKILL.md](./skills/vrc-monitor-agent/SKILL.md)「MCP 工具」章节**，Agent 照此调用。其余 skill 为各能力域的工作流补充（不重复登记工具）：`vrchat-social-queries`（社交域：在线五要素/同屏/规律/昵称）、`vrchat-world-queries`（世界域：待逛/推荐/情报挖掘）、`vrchat-group-queries`（群组域：查询/公告分诊）、`booth-query-display`（BOOTH 检索/展示格式）、`vrchat-assistant-development`（开发规范）、`review-workflow`（审核工作流：PR/issue 审核、端到端实测、多轮复核、协作审核）。
 
 ## 🧰 辅助工具（本机可选）
 
@@ -65,8 +65,14 @@ A: 国内网络可能需代理。服务自动直连 6s 失败后回退到本地�
 **Q: 登录提示 OTP 但一直失败？**
 A: 检查 `credentials.json` 的 `imap_auth_code` 是否为正确的 IMAP 授权码（非登录密码）。服务会在认证失败后冷却 120s（限流 401 则 5min）自动重试。
 
+**Q: 账号启用了 Authenticator（TOTP）两步验证，无法自动登录？**
+A: 支持自动登录：在 `credentials.json` 配置 `totp_secret`（Authenticator 的 otpauth:// URI 或 base32 密钥），服务用 RFC 6238 本地生成验证码，启动/运行期 401/WS 重连全程自动重登录（`/health` 的 `auth.totpAutoEnabled` 为 `true` 表示已启用）。未配置时，`/health` 返回 `auth.needsTotp: true` 后调用 MCP 工具 `submit_totp` 手动提交当前 6 位验证码。账号同时启用邮箱 OTP 时优先自动走邮箱；自动通道优先级：邮箱 OTP → 自动 TOTP → 手动 `submit_totp`。
+
 **Q: cookie 过期了要手动处理吗？**
-A: 不需要。服务启动和 WS 重连都会自动走 OTP 取码登录，有效 cookie 自动落盘 `auth_cookie.txt`。
+A: 不需要。服务启动和 WS 重连都会自动走 OTP 取码登录，有效 cookie 自动落盘 `auth_cookie.txt`。**运行中** API 返回 401（cookie 过期）时服务也会自动触发重新登录——若需要 TOTP 且配置了 `totp_secret` 会自动完成，否则进入 `needsTotp` 状态调用 `submit_totp` 即可，无需重启服务。
+
+**Q: 服务登录失败/需要人工介入时怎么知道？**
+A: 可配置**登录状态主动通知**（issue #69）：复制 `notify-config.example.json` 为 `notify-config.json` 并设 `enabled: true`，服务在进入 `needsTotp`、邮箱 OTP 抓取失败、运行期 401 自动重认证失败、认证恢复时主动提醒宿主（正常自动登录不通知）。`channels` 支持 `desktop`（Linux notify-send / macOS osascript / Windows PowerShell toast）与 `webhook`（POST JSON 到 webhook_url）。连续失败达 `consecutive_fail_threshold`（默认 3）才通知，`min_interval_sec`（默认 300）防刷屏。桌面通知需系统通知守护（Linux dunst/mako），无守护时静默降级不崩服务。
 
 **Q: 数据库文件太大？**
 A: 正常。约 30 万行事件 ≈ 300+ MB。better-sqlite3（WAL 模式）按需读取，不整库载入内存。

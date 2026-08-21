@@ -62,9 +62,12 @@ async function handleRequest(req, res) {
     const uptime = serverState.started ? Math.floor((Date.now() - serverState.started) / 1000) : 0;
     const status = {
       ok: true,
-      auth: serverState.authUser
+      // needsTotp 状态下账号并未真正登录（运行期 401 需 TOTP），即使 authUser 仍保留上次缓存，
+      // 也必须报 authenticated:false 并暴露 needsTotp，避免 /health 误报已认证（issue #59）
+      auth: serverState.authUser && !serverState.needsTotp
         ? { authenticated: true, user: serverState.authUser }
-        : { authenticated: false, needsOtp: serverState.needsOtp },
+        : { authenticated: false, needsOtp: serverState.needsOtp, needsTotp: serverState.needsTotp },
+      totpAutoEnabled: !!(ctx.api?.totpFetcher),
       db: storage.getStats(),
       rateLimiter: rateLimiter.getStats(),
       ws: wsManager?.getState(),
@@ -134,10 +137,12 @@ export function createServer() {
     }
   });
 
-  // 端口冲突不直接 crash
+  // 端口冲突 → 立即退出（防双实例并存互抢 OTP 验证码，issue #49）
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       log(`❌ 端口 ${PORT} 已被占用，请检查是否有旧进程残留`);
+      log('   检测到监控服务可能已在运行，本进程立即退出，避免双实例并存互抢 OTP 验证码');
+      process.exit(1);
     } else {
       log(`❌ 服务器错误: ${err.message}`);
     }
