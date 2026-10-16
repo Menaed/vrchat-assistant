@@ -140,10 +140,10 @@ async function saveMemo() {
   try {
     const r = await post('/api/dashboard/tracked/memo', { userId: user.value.userId, memo: memoDraft.value });
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
-    if (profile.value) profile.value.trackedMemo = memoDraft.value;
         // 2026-10-16（审查 3）：服务端在「行已被并发移除」时返回 { ok:true, updated:false } ⇒ 必须按 updated 判，
     // 否则会提示「备注已保存」而实际什么都没写（静默假成功）✗
     if (r.updated === false) { toast('该用户已不在追踪列表，备注未生效', 'info'); return; }
+    if (profile.value) profile.value.trackedMemo = memoDraft.value;
 toast('备注已保存', 'success');
   } catch (e) { toast('备注保存失败：' + (e.message || e), 'error'); }   // 失败必须可见，不伪装成功
   finally { memoSaving.value = false; }

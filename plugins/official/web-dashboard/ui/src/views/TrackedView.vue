@@ -411,6 +411,9 @@ onMounted(load);
   .tk-search { width: 100%; order: 2; }
   .tk-tools { order: 3; }
   .tk-detail { margin-left: 0; }
+  /* 2026-10-16 审查 ⚠️1：这条来自 main（原第 495 行），本轮重构时漏还原 ⇒ 窄屏下长 bio/状态旧值
+     从「换行」退化成「单行省略号截断」= 信息可见性下降，已还原 ✓ */
+  .tc-old, .tc-new { white-space: normal; }
 }
 
 /* ── tk-polish-2026-09-22（用户："非好友追踪这个界面是不是太丑了"）────────────────
@@ -450,12 +453,6 @@ onMounted(load);
 
 /* ── tk-sub-oneline-2026-09-22（用户：「最近变化和上次检测可以放到一行吧？」）───────────
    元信息强制单行、超出省略；动作按钮随行尾对齐 ✓ */
-
-/* ── tk-memoline-2026-09-22（用户：「备注是在下面单开一行」）──────────────────
-   备注独占一行：淡底 + 细边框 + 铅笔小图标；可点击编辑；长备注换行不撑破卡片 ✓ */
-.tk-memoline { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px;
-  padding: 4px 8px; border-radius: 6px; background: var(--surface-2);
-  border: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; cursor: pointer; }
 
 /* ── friend-page-2026-09-22（用户：「先按好友页的样式统一」）──────────────────
    以下 6 条与 FriendsView.vue:242-258 **完全一致**（同变量同数值 ✓），仅作用域在本组件 ✓ */
