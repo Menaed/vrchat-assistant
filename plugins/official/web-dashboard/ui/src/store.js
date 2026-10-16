@@ -27,6 +27,9 @@ function parseEvents(d) {
 
 export const store = reactive({
   authRequired: null,   // null=未知（探针未跑）/ false=不需要鉴权 / true=需要 ✓
+  // 2026-10-16（审查 💡1）：**显式声明**——它是数据面的核心门禁（startDashboard 的 authed 读它），
+  // 只在 App.vue 的 verifyToken 成功后置 true；不声明的话单看本文件发现不了这个契约 ✓
+  authVerified: false,
   view: 'feed',
   isMobile: false,
   navOpen: false,
