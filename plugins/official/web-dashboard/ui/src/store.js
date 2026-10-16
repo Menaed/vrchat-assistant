@@ -698,24 +698,28 @@ let __dashStarted = false;   // 本地初始化门（幂等：只做一次，重
 let __dataStarted = false;   // 数据面门（只有 authed 时才开，且只开一次）
 export function startDashboard() {
   const authed = (() => { try { return !!getToken() || store.authRequired === false; } catch { return false; } })();
+  // 2026-10-16（合并上游与本仓实现）：**保留上游的双门 + authRequired 语义**（未启用令牌的部署靠它放行数据面），
+  // 同时套上本仓的「逐步独立兜底」——本函数此前是一条直线，任何一步抛错（实测首步 initFromHash 即抛）
+  // 都会让后面的数据加载全部不执行 ⇒ 页面能渲染但 **api:0**（「暂无动态」却没有任何请求）✗ ✓
+  const step = (name, fn) => { try { fn(); } catch (e) { console.warn('[dashboard] 启动步骤失败 ' + name + ':', e); } };
   // —— 本地初始化：不依赖鉴权，幂等 ——
   if (!__dashStarted) {
     __dashStarted = true;
-    initFromHash();
-    try { store.notifyEnabled = localStorage.getItem('vrc_notify') === '1'; } catch { /* 隐私模式 */ }
-    trackViewport();
-    initKeyboard();
-    bindHashChange();
+    step('initFromHash', () => initFromHash());
+    step('notifyEnabled', () => { store.notifyEnabled = localStorage.getItem('vrc_notify') === '1'; });
+    step('trackViewport', () => trackViewport());
+    step('initKeyboard', () => initKeyboard());
+    step('bindHashChange', () => bindHashChange());
   }
   // —— 数据面：未登录不请求、不连 SSE、不轮询；探针判定后由 App 再调一次即可启动 ——
   if (!__dataStarted && authed) {
     __dataStarted = true;
-    load();
-    loadWatchlist();
-    loadTracked();
-    loadNotifCount();
-    loadAnnNewFlag();
-    startSse();   // 与数据加载同处守卫（原 SSE 没进守卫 ⇒ 一连上就触发 load() ⇒ 登录页 overview 401）
-    setInterval(() => load(true), 120000);   // 全量校准：120s 一次（未登录不轮询）
+    step('load', () => load());
+    step('loadWatchlist', () => loadWatchlist());
+    step('loadTracked', () => loadTracked());
+    step('loadNotifCount', () => loadNotifCount());
+    step('loadAnnNewFlag', () => loadAnnNewFlag());
+    step('startSse', () => startSse());   // 与数据加载同处守卫（原 SSE 没进守卫 ⇒ 一连上就触发 load() ⇒ 登录页 overview 401）
+    step('poll', () => setInterval(() => load(true), 120000));   // 全量校准：120s 一次（未登录不轮询）
   }
 }
