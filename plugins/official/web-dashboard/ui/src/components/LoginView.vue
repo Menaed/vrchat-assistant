@@ -2,9 +2,11 @@
 import { ref } from 'vue';
 import { setToken, verifyToken } from '../api.js';
 
+// 2026-10-16：接收父组件传来的探测失败原因（issue #213）—— 让登录页一进来就显示原因，而不是只写控制台
+const props = defineProps({ initialError: { type: String, default: '' } });
 const token = ref('');
 const showPwd = ref(false);
-const error = ref('');
+const error = ref(props.initialError || '');
 const loading = ref(false);
 
 async function submit() {

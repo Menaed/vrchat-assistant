@@ -109,6 +109,8 @@ onMounted(() => document.addEventListener('scroll', onAnyScroll, true));
 
 // ── 登录页控制 ──
 const loginView = ref(!hasToken());
+// 探测失败的原因：透出到登录页（issue #213 的 UX 项 —— 此前只 console.warn，用户看到的是一个没有任何解释的登录页）
+const loginReason = ref('');
 // 本地无 token 时先裸探测服务端是否真的要令牌（api.js probeAuthRequired）：
 // 未启用鉴权（单机默认）→ 直接进面板，不再逼用户输入一个从未配置过的令牌（issue #213）；
 // 探测失败（服务未启动 / 网络异常）保留登录门，由登录页给出连接错误提示。
@@ -123,7 +125,12 @@ onMounted(async () => {
       store.authRequired = true;
     }
     if (!loginView.value) startDashboard();   // 2026-09-22：登录成功后才拉数据（登录页此前会打全部接口 ✗）
-  } catch { /* 保留登录门 */ } finally {
+  } catch (e) {
+    // 失败原因要**落到界面上**，不能只进控制台：未配令牌/服务没起的部署，用户不知道该填什么（issue #213）
+    console.warn('[auth] 探测失败（保留登录门）:', e);
+    loginReason.value = '无法连接服务：' + ((e && e.message) || e || '未知错误') + '（请确认服务已启动后再试）';
+    loginView.value = true;
+  } finally {
     authChecking.value = false;
   }
 });
@@ -181,7 +188,7 @@ async function refresh() {
     <i class="pi pi-spin pi-spinner"></i>
     <span>正在检查访问鉴权…</span>
   </div>
-  <LoginView v-else-if="loginView" />
+  <LoginView v-else-if="loginView" :initial-error="loginReason" />
   <div v-else class="app-shell">
     <header class="app-header">
       <Button v-if="store.isMobile" icon="pi pi-bars" text rounded @click="store.navOpen = true" aria-label="打开菜单" />
