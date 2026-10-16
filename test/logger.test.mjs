@@ -73,6 +73,13 @@ test('脱敏：中文校验码（验证码/校验码/动态码）覆盖，且不
   const prod = redactSecrets('无效的验证码: "123456"，应为6位数字');
   assert.ok(!prod.includes('123456'), '真实句子里的引号包裹验证码必须打码（上一版会漏 ✗）');
   const prod2 = redactSecrets('无效的 TOTP 验证码: "ABC123"');
+  // 2026-10-16 审查 💡1/💡2：组合分隔符与紧贴数字形态
+  const combo1 = redactSecrets('验证码为：123456');
+  assert.ok(!combo1.includes('123456'), '组合分隔符必须打码');
+  const combo2 = redactSecrets('校验码是：ABC123');
+  assert.ok(!combo2.includes('ABC123'), '是+冒号同样必须打码');
+  const tight = redactSecrets('验证码123456已发送');
+  assert.ok(!tight.includes('123456') && tight.includes('已发送'), '紧贴数字要遮且不得吞正文');
   assert.ok(!prod2.includes('ABC123'), 'TOTP 形态同样必须打码');
   // 2026-10-16 审查（另一条 💡）：真实调用点还会**拼接**上一层 message（`start-monitor.js:902`）—— 一起钉住
   const composed = redactSecrets('启动登录失败：无效的验证码: "123456"，应为6位数字');
