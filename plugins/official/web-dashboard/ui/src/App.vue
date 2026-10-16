@@ -122,6 +122,7 @@ onMounted(async () => {
   try {
     if (hasToken()) {
       if (await verifyToken(getToken())) {
+        store.authVerified = true;   // 🔴1：校验通过才允许数据面打开（main.js 那次调用会因此空跑、零请求）
         store.authRequired = true;
         loginView.value = false;
       } else {

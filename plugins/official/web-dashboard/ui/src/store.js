@@ -697,7 +697,9 @@ function initKeyboard() {
 let __dashStarted = false;   // 本地初始化门（幂等：只做一次，重复调用无副作用）
 let __dataStarted = false;   // 数据面门（只有 authed 时才开，且只开一次）
 export function startDashboard() {
-  const authed = (() => { try { return !!getToken() || store.authRequired === false; } catch { return false; } })();
+  // 2026-10-16 审查 🔴1：真实入口是 main.js 先 startDashboard() 再 mount ⇒ 有旧令牌时
+  // authed 若只看 getToken() 就会在校验前打开数据面（实测 13 个请求）
+  // ⇒ 数据面必须等「令牌已校验通过（store.authVerified）」；未启用令牌的部署走 authRequired === false ✓\n  const authed = (() => { try { return (!!getToken() && store.authVerified === true) || store.authRequired === false; } catch { return false; } })();
   // 2026-10-16（合并上游与本仓实现）：**保留上游的双门 + authRequired 语义**（未启用令牌的部署靠它放行数据面），
   // 同时套上本仓的「逐步独立兜底」——本函数此前是一条直线，任何一步抛错（实测首步 initFromHash 即抛）
   // 都会让后面的数据加载全部不执行 ⇒ 页面能渲染但 **api:0**（「暂无动态」却没有任何请求）✗ ✓
