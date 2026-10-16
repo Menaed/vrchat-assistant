@@ -62,6 +62,15 @@ test('脱敏：中文校验码（验证码/校验码/动态码）覆盖，且不
   assert.ok(!out.includes('ABC123'), '校验码值不得泄漏');
   assert.ok(out.includes('验证码：[REDACTED]'), '应保留「验证码：」前缀 + 脱敏值');
   // 无分隔符的正文不得被误吞（要求显式 : = ：）
+  // 2026-10-16 审查 ⚠️1/⚠️2：补自然语序（必须命中）与「分隔符后是中文正文」（不得吞）两组边界
+  const natural = redactSecrets('您的验证码是 123456，请勿泄露');
+  assert.ok(natural.includes('[REDACTED]'), '自然语序（是 + 码）必须打码');
+  const natural2 = redactSecrets('校验码 ABC123 已生成 动态码 654321');
+  assert.ok(!natural2.includes('ABC123') && !natural2.includes('654321'), '纯空格分隔的码也必须打码');
+  const noSwallow = redactSecrets('验证码：短信已发送到邮箱');
+  assert.ok(noSwallow.includes('短信已发送到邮箱'), '分隔符后面是中文正文时**不得**吞掉（旧写法会整句遮掉）');
+  const paren = redactSecrets('验证码：123456（5分钟内有效）');
+  assert.ok(paren.includes('[REDACTED]') && paren.includes('（5分钟内有效）'), '括号说明不得被吞');
   const prose = redactSecrets('请输入验证码 已发送到邮箱');
   assert.ok(prose.includes('已发送'), '无分隔符时不得吞掉后续正文');
 });
