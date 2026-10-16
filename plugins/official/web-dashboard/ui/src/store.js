@@ -310,7 +310,7 @@ function writeCache(patch) {
   try {
     const cur = readCache() || {};
     localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cur, ...patch, at: Date.now() }));
-  } catch { /* 隐私模式/配额满：静默跳过，不影响功能 */ }
+  } catch (e) { console.debug('[dashboard] 缓存写入跳过（隐私模式/配额满）:', e); }
 }
 export function clearDashCache() { try { localStorage.removeItem(CACHE_KEY); } catch {} }
 function cacheFresh(o) { return !!o && (Date.now() - (o.at || 0)) < CACHE_TTL_MS; }
@@ -341,6 +341,9 @@ export function hydrateFromCache() {
     } catch { /* 缓存形状不可用 ⇒ 跳过 hydrate，等接口 ✓ */ }
   }
   if (c.overview && !store.overview) { store.overview = c.overview; hit = true; }
+  if (c.me && !store.me) { store.me = c.me; hit = true; }
+  if (c.nicknameMap && !Object.keys(store.nicknameMap || {}).length) { store.nicknameMap = c.nicknameMap; hit = true; }
+  if (Array.isArray(c.favFriendIds) && c.favFriendIds.length && !(store.favFriendIds && store.favFriendIds.size)) { store.favFriendIds = new Set(c.favFriendIds); hit = true; }
   if (c.eventsRange && c.eventsRange.min) { store.eventsRange = c.eventsRange; hit = true; }
   if (hit) console.info('[dashboard] 首屏使用本地缓存渲染（' + (cacheFresh(c) ? '新鲜' : '已过期') + '），随后静默刷新');
   return hit;
@@ -413,6 +416,10 @@ export async function load(quiet = false) {
       feedEvents: store.feedEvents.slice(0, 50),
       feedTotal: store.feedTotal,
       overview: store.overview,
+      me: store.me,
+      nicknameMap: store.nicknameMap,
+      // ⚠️1（审查）：Set 不能直接 JSON 化 ⇒ 存数组、hydrate 时重建 Set（首屏「仅星标」与昵称列不再短暂为空）
+      favFriendIds: Array.from(store.favFriendIds || []),
       eventsRange: store.eventsRange,
     });
 
