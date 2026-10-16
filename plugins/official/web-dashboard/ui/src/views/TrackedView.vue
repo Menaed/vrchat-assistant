@@ -384,7 +384,6 @@ onMounted(load);
 .ta-name { font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ta-sub { font-size: 11px; color: var(--text-dim); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.tk-list { display: flex; flex-direction: column; gap: 6px; }
 .tk-item { display: flex; flex-direction: column; gap: 3px; }
 
 .tk-detail { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; margin-left: 34px; }
@@ -436,7 +435,6 @@ onMounted(load);
 .tc-av { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-soft); }
 .tc-avnone { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-dim); }
 .tc-avlabel { font-size: 9px; color: var(--text-dim); }
-.tc-avarrow { color: var(--text-dim); }
 /* 5) 卡片：与其它列表一致的分隔与悬停反馈 */
 .tc-card { border: 1px solid var(--border-soft); border-radius: var(--radius); }
 .tc-card:hover { border-color: var(--border); }
@@ -466,8 +464,6 @@ onMounted(load);
 /* ==== 以下样式整块抄自 FriendsView（用户 2026-09-22 要求「整个样式都抄过来」） ==== */
 
 /* 搜索框与右侧好友栏搜索统一 32px；几何全写死不随字体加载伸缩 */
-.fc-text { min-width: 0; }
-.fc-memo { display: block; font-size: 10px; color: var(--accent); opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .fc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(1px); }
 .fc-plat {
   flex: none;
