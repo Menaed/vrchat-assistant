@@ -1,5 +1,4 @@
 
-// @vitest-environment happy-dom
 /**
  * store-cache.test.js —— 首屏缓存 hydrate / 回写 的永久回归用例
  *
@@ -10,6 +9,40 @@
  * 形态照审查方探针：**驱动真实 store.js**（不 mock 被测模块），只桩外围 IO（localStorage 由 happy-dom 提供 + fetch 桩）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// 2026-10-16 审查 nixi-agent（#291 的红色阻断）：不要引用未声明的 happy-dom —— 它只是 vitest 的可选 peer，
+//   CI 的 npm ci 不装它，带那条环境指令的文件在干净检出上会加载失败、用例一条都不跑（本 PR 正文的 53/53 就是失真读数）。
+//   改为自带最小桩，在 import 被测模块之前装好；验证＝把 node_modules/happy-dom 临时移走后再跑本文件（模拟 CI）。
+const mkStorage = () => {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+    clear: () => { m.clear(); },
+    key: (i) => Array.from(m.keys())[i] ?? null,
+    get length() { return m.size; },
+  };
+};
+globalThis.localStorage = mkStorage();
+globalThis.sessionStorage = mkStorage();
+globalThis.location = { search: '', hash: '', pathname: '/', href: 'http://localhost/' };
+// ⚠️ window 必须是**真 EventTarget**：store.js 的「401 ⇒ 清缓存」靠事件（addEventListener + dispatchEvent）驱动，
+//   用空实现会把这条链路静默掐断（首版就是这样，用例 ⑤ 随即变红）。
+const win = new EventTarget();
+Object.assign(win, {
+  matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+  innerWidth: 1280, innerHeight: 800,
+  localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, location: globalThis.location,
+});
+globalThis.window = win;
+globalThis.addEventListener = win.addEventListener.bind(win);
+globalThis.dispatchEvent = win.dispatchEvent.bind(win);
+globalThis.document = {
+  title: '', body: { appendChild: () => {} },
+  createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {}, select: () => {}, focus: () => {} }),
+  querySelector: () => null, addEventListener: () => {}, execCommand: () => true,
+};
 
 const KEY = 'vrc.dash.cache';
 let mode = 'ok';
