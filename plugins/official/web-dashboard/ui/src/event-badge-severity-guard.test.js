@@ -30,7 +30,10 @@ describe('事件徽章 severity 护栏（定点）', () => {
 // 而上面那条护栏只扫 constants/event-types.js ⇒ 按他的意见把护栏扩到视图层。
 describe('视图层 severity 取值护栏（2026-10-16 审查 nixi-agent 💡1）', () => {
   it('src/views 与 src/components 下的 .vue 不得出现非法 severity 值', () => {
-    const OK = new Set(['secondary', 'success', 'info', 'warn', 'danger', 'contrast']);
+    // 2026-10-16 审查 nixi-agent（issue #295）：contrast 虽是 PrimeVue 合法值，但本面板**默认深色**，contrast 语义是
+    // 「与背景最大对比」⇒ 深色下渲染成**白底**，与相邻徽章不一致（issue #295 的正是这一类）⇒ 从允许表里剔除，
+    // 需要「高对比」时用 secondary/info 等同族色；确有必要用 contrast 的场合应显式加白名单并写明理由。
+    const OK = new Set(['secondary', 'success', 'info', 'warn', 'danger']);
     const files = [];
     const walk = (d) => {
       for (const e of readdirSync(d, { withFileTypes: true })) {
