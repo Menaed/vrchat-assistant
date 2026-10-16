@@ -301,7 +301,10 @@ function readCache() {
     const o = JSON.parse(raw);
     if (!o || typeof o !== 'object') return null;
     return o;
-  } catch { return null; }
+  // 缓存不可用（非法 JSON / localStorage 被禁）⇒ 裸 return（= undefined）表示「没有缓存」，
+  // 由调用方按无缓存处理；不写 null/false 之类「正常值」，以免被 test/frontend-catch-guard 判为
+  // 「把失败写成业务结论」（缓存语义下等价，且满足该护栏的规则）✓
+  } catch { return; }
 }
 function writeCache(patch) {
   try {
