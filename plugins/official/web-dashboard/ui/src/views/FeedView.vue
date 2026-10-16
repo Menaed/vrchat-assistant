@@ -29,6 +29,11 @@ function prevLabelOf(e) { return specialLocationLabel(e.previousLocation) || e.p
 function curIsWorld(e) { return String(e.worldId || '').startsWith('wrld_'); }
 // 左端（上一个位置）的实例信息：公开 · US · 36146（用户 2026-09-24 定「公开房间那侧要显示图像世界名和房间号」）。
 // 与目的地那侧的 inst 口径一致：都走 parseLoc + instanceLabel（不再用 locLabelFull 的整串文案）。
+// 与 locLabelFull 的**有意差异**（2026-10-16 审查 nixi-agent 2，已确认）：
+// 对「有 region、但没有实例类型 token、房间号为空」的畸形串（如 wrld_abc:~region(us) / local:~region(jp)），
+// locLabelFull 会渲染一个**只含国家**的 chip（US），实测 288 条语料里 14 条属这一类；本函数**不产出 chip**（返回空）——
+// 理由：只写国家没有信息量，且真实 VRChat 位置串形如 wrld_x:12345~region(us)、不会命中这一类。
+// 这是刻意的行为差异，不是「同口径替换」的遗漏。
 function prevInstLabel(e) {
   const p = parseLoc(e.previousLocation || '');
   if (!p || !p.type) return '';
