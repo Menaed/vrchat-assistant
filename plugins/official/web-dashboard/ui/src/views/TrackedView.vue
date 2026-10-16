@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { get, post } from '../api.js';
-import { time, date, dateTime, avatarLabel , reltime, statusLabels } from '../utils.js';
+import { time, date, dateTime, avatarLabel , reltime, statusLabels, trustColor, platformIcon, platformLabel } from '../utils.js';
 import { statusColor } from '../composables/useFriendGroups.js';
 import { openUser } from '../store.js';
 import { toast } from '../toast.js';
@@ -225,7 +225,9 @@ const locLabel = (l) => { const v = String(l || ''); if (!v || v === 'offline') 
 const statusText = (s) => statusLabels[s] || s || '—';
 // 状态圆点颜色（对齐好友页视觉）：在线系绿色，离线灰色
 function statusDotStyle(loc) {
-  return { background: isOnline(loc) ? '#52c41a' : 'var(--border-strong)' };
+  // 2026-09-22 用户报「状态那行被缩进、圆点看不见」✗：原来用的 var(--border-strong) **项目里没有这个令牌** ✗
+  // ⇒ 背景无效 ⇒ 圆点透明但照样占 8px+间隙 ⇒ 文字看着被缩进 ✓。改用项目真实令牌（与好友页同色系 ✓）。
+  return { background: isOnline(loc) ? 'var(--ok)' : 'var(--text-dim)' };
 }
 // 真实在线判定：只看 location（status 是用户偏好，离线保留）。offline=真离线、offline:offline=网页在线不在世界、traveling=转场，均不算在游戏中。
 const isOnline = (loc) => {
@@ -311,37 +313,26 @@ onMounted(load);
     </div>
     <div v-else class="tk-list">
       <div v-for="x in filtered" :key="x.userId" class="tk-item">
-        <button type="button" class="tk-row" :class="{ open: expanded === x.userId }" @click="toggle(x.userId)">
-          <Avatar :image="x.avatarUrl || ''" :label="avatarLabel(x.avatarUrl, x.displayName)" shape="circle" size="large" />
-          <div class="tk-info">
-            <b class="tk-name">
-              <span v-if="x.status" class="tk-dot" :style="statusDotStyle(x.location)" :title="'当前状态：' + statusText(x.status)"></span>
-              {{ x.displayName || x.userId }}
-              <Tag v-if="memoOf(x)" class="tk-memotag" :title="memoOf(x)">备注</Tag>
-            </b>
-            <small class="tk-sub">
-              <span class="tk-statusline">
-                <span class="mono tk-uid">{{ x.userId }}</span>
-                <span v-if="x.status" class="tk-status" :class="{ on: isOnline(x.location) }">{{ statusText(x.status) }}</span>
-              </span>
-              <span v-if="lastChangeAt(x)" class="tk-stat">最近变化 {{ reltime(lastChangeAt(x)) }}</span>
-              <span v-if="x.lastRefreshAt" class="tk-stat tk-stat-dim">上次检测 {{ fmtRefresh(x.lastRefreshAt) }}</span>
-              <span v-else class="tk-stat tk-stat-dim">尚未检测</span>
-            </small>
+        <!-- 2026-09-22：由 button 改为 div[role=button] —— 用户要求「资料/移除」放到本行末尾，而 button 内不能嵌套 button ✗（动态流页同做法）-->
+        <!-- 2026-09-22 用户：「先把这一页按好友页的样式统一」✓ —— 行结构与样式对齐 FriendsView 的 .friend-card：
+             Avatar + .fc-text（名字 → 备注 → uid/状态 → 最近变化·上次检测），动作区右推在本行末尾 ✓ -->
+        <!-- 2026-09-22 用户：把好友页的整个样式抄过来 ✓；多出来的信息与按钮**先不加** ✓（由用户决定怎么加）
+             因此本卡＝好友页 .friend-card 的等价物：头像 + 名字 + 备注 + 状态，无资料/移除/展开/最近变化 ✓ -->
+        <div class="friend-card" role="button" tabindex="0" @click="openUser(x.userId)" @keydown.enter="openUser(x.userId)">
+          <Avatar :image="x.avatarUrl || ''" :label="avatarLabel(x.avatarUrl, x.displayName)" shape="circle" />
+          <div class="fc-text">
+            <b :style="{ color: trustColor(x.trustLevel) }" :title="x.trustLevel ? ('信任等级：' + x.trustLevel) : ''">{{ x.displayName || x.userId }}</b><!-- 2026-09-22：非好友现在也有信任等级了（来自 tags ✓）⇒ 名字配色自动生效 ✓ + 悬停可看等级名 ✓（与好友页口径一致 ✓）-->
+            <small><span class="fc-dot" :style="statusDotStyle(x.location)"></span>{{ x.statusDescription || statusText(x.status) }}<i v-if="platformIcon(x.platform)" class="pi fc-plat" :class="platformIcon(x.platform)" :title="platformLabel(x.platform)"></i><!-- 2026-09-22 用户报「平台图标是乱码」✗：漏了 pi（图标字体基础类）与 fc-plat（尺寸样式）⇒ 渲染成豆腐块 ✓；现与好友页写法完全一致 ✓ --></small>
+            <small v-if="memoOf(x)" class="fc-memo" :title="memoOf(x)">{{ memoOf(x) }}</small>   <!-- 2026-09-22 用户：备注行放到在线行下面 ✓ -->
+<small class="tk-meta">
+                          <span v-if="lastChangeAt(x)">变化 {{ reltime(lastChangeAt(x)) }}</span><!-- 2026-09-22 用户：卡片一行放不下「上次资料变化」⇒ 用短的「变化」✓（弹窗空间够，那边保留全称 ✓） -->
+                          <span v-if="lastChangeAt(x) && x.lastRefreshAt">·</span>
+                          <span v-if="x.lastRefreshAt">上次检测 {{ fmtRefresh(x.lastRefreshAt) }}</span>
+                          <span v-if="!lastChangeAt(x) && !x.lastRefreshAt">暂无记录</span>
+                        </small>
+            
           </div>
-          <span v-if="lastChangeAt(x)" class="tk-dot" title="有资料变化"></span>
-          <Button size="small" text rounded icon="pi pi-pencil" :severity="memoOf(x) ? 'secondary' : 'contrast'"
-            :title="memoOf(x) ? '备注：' + memoOf(x) : '添加备注'" :aria-label="'编辑备注：' + (x.displayName || x.userId)"
-            @click.stop="openMemo(x)" />
-          <Button size="small" text rounded :icon="expanded === x.userId ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
-            :aria-label="expanded === x.userId ? '收起变化历史' : '展开变化历史'" @click.stop="toggle(x.userId)" />
-        </button>
-
-        <div class="tk-actions" @click.stop>
-          <Button size="small" text icon="pi pi-user" label="资料" title="打开资料" :aria-label="'打开 ' + (x.displayName || x.userId) + ' 的资料'" @click="openUser(x.userId)" />
-          <Button size="small" text severity="danger" icon="pi pi-user-minus" label="移除" title="移除追踪" :aria-label="'移除追踪 ' + (x.displayName || x.userId)" @click="removeTracked(x)" />
         </div>
-
         <!-- 展开：变化时间线 -->
         <div v-if="expanded === x.userId" class="tk-detail">
           <div v-if="loadingChanges === x.userId" class="loading-mini"><ProgressSpinner style="width:22px;height:22px" strokeWidth="4" /></div>
@@ -406,14 +397,7 @@ onMounted(load);
       </div>
     </div>
 
-    <Dialog v-model:visible="memoDialog" modal :header="'备注：' + (memoTarget ? memoTarget.displayName : '')" :style="{ width: '420px', maxWidth: '92vw' }">
-      <Textarea v-model="memoDraft" rows="4" maxlength="200" autoResize class="w-full" placeholder="给这个非好友写点备注（≤200 字符，仅自己可见）" @keydown.enter.exact.prevent="saveMemo" />
-      <small class="tk-memohint">{{ memoDraft.length }}/200</small>
-      <template #footer>
-        <Button size="small" text label="取消" @click="memoDialog = false" />
-        <Button size="small" :label="memoOf({ memo: memoDraft }) ? '保存' : '清除备注'" icon="pi pi-check" :loading="memoSaving" @click="saveMemo" />
-      </template>
-    </Dialog>
+
 </template>
 
 <style scoped>
@@ -451,13 +435,13 @@ onMounted(load);
 .tk-statusline { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tk-status { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; line-height: 16px; flex: none; }
 .tk-status.on { color: #52c41a; border-color: rgba(82, 196, 26, 0.4); }
-.tk-sub { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.tk-sub { font-size: 11px; color: var(--text-dim); display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px; overflow: hidden; white-space: nowrap; }
 .tk-uid { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.tk-stat { color: var(--accent); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-stat { color: var(--accent); display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
 .tk-stat { color: var(--accent); flex: none; }
 .tk-stat-dim { color: var(--text-dim); }
 .tk-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
-.tk-actions { display: flex; gap: 2px; margin-left: 42px; margin-top: 1px; }
+.tk-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
 
 .tk-detail { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; margin-left: 34px; }
 .tk-empty { font-size: 12px; color: var(--text-dim); padding: 6px 2px; }
@@ -494,4 +478,182 @@ onMounted(load);
   .tk-detail { margin-left: 0; }
   .tc-old, .tc-new { white-space: normal; }
 }
+
+/* ── tk-polish-2026-09-22（用户："非好友追踪这个界面是不是太丑了"）────────────────
+   只加样式、不动结构：修「筛选 chip 被挤成孤字」「详情内容贴左留白」「时间列不对齐」「头像对尺寸不一」。
+   全部使用项目令牌（--surface/--border-soft/--text/--text-dim）✓ 不引入新颜色 ✓ */
+/* 1) 筛选 chip 行：允许换行、均匀间距，避免「头像」被拆成孤字 */
+.tc-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tc-chip { white-space: nowrap; }
+/* 2) 时间列：等宽数字 + 稍宽，时间与内容对齐 */
+.tc-rail { width: 86px; font-variant-numeric: tabular-nums; }
+.tc-rail b, .tc-rail strong { font-size: 12.5px; color: var(--text); }
+.tc-date { font-size: 10px; color: var(--text-dim); }
+/* 3) 内容列：占满剩余宽度、正文用主文本色（旧值仍为 dim + 删除线）*/
+.tc-body { flex: 1; min-width: 0; color: var(--text); }
+.tc-body > * { min-width: 0; }
+.tc-new { color: var(--text); }
+/* 4) 头像对：统一 24px 圆角，与全站 .av-thumb 一致 */
+.tc-avpair { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tc-av { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-soft); }
+.tc-avnone { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-dim); }
+.tc-avlabel { font-size: 9px; color: var(--text-dim); }
+.tc-avarrow { color: var(--text-dim); }
+/* 5) 卡片：与其它列表一致的分隔与悬停反馈 */
+.tc-card { border: 1px solid var(--border-soft); border-radius: var(--radius); }
+.tc-card:hover { border-color: var(--border); }
+
+/* ── tk-grid-2026-09-22（用户：「PC 端你不觉得一条太长了吗？」）────────────────
+   宽屏改为多列卡片网格：一屏 2 列（≥1200px）/ 3 列（≥1700px），窄屏保持 1 列。
+   展开的详情用 :has() 自动占满整行（Chromium 支持 ✓），避免详情被挤在 570px 里。*/
+/* 2026-09-22 用户：与好友页**同一套网格**（.fg-body 同款 auto-fill minmax(240px,1fr) ⇒ 宽屏约 5 个/行 ✓）*/
+/* 2026-09-22 用户：有备注和没备注的块高度不一样 ✗ => 去掉我自加的 align-items:start，
+   与好友页 .fg-body 完全一致（默认 stretch = 同一行卡片自动等高 ✓）*/
+.tk-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+@media (max-width: 900px) { .tk-list { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .tk-list { grid-template-columns: 1fr; } }
+.tk-item:has(.tk-row.open) { grid-column: 1 / -1; }
+
+/* ── tk-sub-oneline-2026-09-22（用户：「最近变化和上次检测可以放到一行吧？」）───────────
+   元信息强制单行、超出省略；动作按钮随行尾对齐 ✓ */
+.tk-sub { display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 6px; }
+.tk-sub > * { flex: none; }
+.tk-uid { overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
+.tk-sep { color: var(--text-dim); }
+.tk-row .tk-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; flex: none; }
+
+/* ── tk-memoline-2026-09-22（用户：「备注是在下面单开一行」）──────────────────
+   备注独占一行：淡底 + 细边框 + 铅笔小图标；可点击编辑；长备注换行不撑破卡片 ✓ */
+.tk-memoline { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px;
+  padding: 4px 8px; border-radius: 6px; background: var(--surface-2);
+  border: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; cursor: pointer; }
+.tk-memoline:hover { border-color: var(--border); color: var(--text); }
+.tk-memoline > i { font-size: 11px; margin-top: 2px; }
+.tk-memotext { white-space: pre-wrap; word-break: break-word; }
+
+/* ── friend-page-2026-09-22（用户：「先按好友页的样式统一」）──────────────────
+   以下 6 条与 FriendsView.vue:242-258 **完全一致**（同变量同数值 ✓），仅作用域在本组件 ✓ */
+.friend-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius); cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.friend-card:hover { background: var(--surface-2); border-color: var(--border); }
+.fc-text { min-width: 0; flex: 1; }
+.fc-text b { display: block; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-text small { color: var(--text-dim); font-size: 11px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-memo { display: block; font-size: 10px; color: var(--accent); opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; cursor: pointer; }
+/* 增量：动作区右推（好友页卡内没有动作按钮 ✓）*/
+.tk-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; }
+/* ==== 以下样式整块抄自 FriendsView（用户 2026-09-22 要求「整个样式都抄过来」） ==== */
+
+.fv-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ft-spacer { flex: 1; }
+/* 搜索框与右侧好友栏搜索统一 32px；几何全写死不随字体加载伸缩 */
+.fv-search {
+  max-width: 240px;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  line-height: 1;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 12.5px;
+}
+.fg { margin-bottom: 14px; }
+.fg-thumb {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: 5px;
+  flex: none;
+}
+.fg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  border-left: 3px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+.fg-head:hover { background: var(--surface-2); color: var(--text); }
+.fg-head.accent { color: var(--accent); border-left-color: var(--accent); }
+.fg-arrow { flex: none; font-size: 9px; opacity: 0.7; margin-left: 2px; }
+.fg-count { margin-left: auto; flex: none; font-size: 10.5px; color: var(--text-dim); background: var(--surface-3); padding: 1px 7px; border-radius: 10px; }
+.fg-mixed {
+  font-size: 11px;
+  color: var(--text-dim, #8a93a3);
+  white-space: nowrap;
+}
+.fg-loc {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  padding: 0 7px;
+  border-radius: 8px;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42%;
+  min-width: 0;
+}
+.fg-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+.friend-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.friend-card:hover { background: var(--surface-2); border-color: var(--border); }
+.fc-text { min-width: 0; }
+.fc-text b { display: block; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-text small { color: var(--text-dim); font-size: 11px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-memo { display: block; font-size: 10px; color: var(--accent); opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.fc-loc { display: block; font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; cursor: pointer; }
+.fc-loc:hover { color: var(--accent); }
+.fc-loc i { font-size: 8px; }
+.fc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(1px); }
+.fc-plat {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1;
+  cursor: help;
+}
+.fc-plat:hover { color: var(--text); }
+@media (max-width: 899px) {
+  .fg-body { grid-template-columns: 1fr 1fr; }
+  /* 移动端：tab 与搜索框换行，搜索框独占一行全宽（此前被 5 个 tab 挤压到 74px 不可用） */
+  .fv-toolbar { flex-wrap: wrap; row-gap: 8px; }
+  .fv-toolbar .p-selectbutton, .fv-toolbar .p-selectbutton > * { max-width: 100%; }
+  .fv-search { max-width: none; flex: 1 1 100%; order: 3; }
+  /* C1/C2：触屏目标加大 + 字号提升 */
+  .fg-head { padding: 8px 9px; }
+  .fg-head > span:nth-child(2) { font-size: 12.5px; }
+  .friend-card { padding: 10px 11px; }
+  .fc-text b { font-size: 13px; }
+  .fc-text small { font-size: 11.5px; }
+}
+@media (max-width: 560px) {
+  .fg-body { grid-template-columns: 1fr; }
+}
+
+
+/* 2026-09-22 用户：有备注和没备注的块高度不一样 ✗
+   网格项 .tk-item 会被 stretch 拉齐 ✓，但项内的卡片不跟着撑满 ✗ ⇒ 补这几条：
+   让 .tk-item 变成等高列、卡片 height:100% 填满 ✓（等价于"同排卡片一样高"✓） */
+.tk-list > .tk-item { display: flex; flex-direction: column; }
+.tk-list > .tk-item > .friend-card { height: 100%; }
+
 </style>
