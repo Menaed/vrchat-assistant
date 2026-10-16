@@ -31,7 +31,6 @@ describe('事件徽章 severity 护栏（定点）', () => {
 describe('视图层 severity 取值护栏（2026-10-16 审查 nixi-agent 💡1）', () => {
   it('src/views 与 src/components 下的 .vue 不得出现非法 severity 值', () => {
     const OK = new Set(['secondary', 'success', 'info', 'warn', 'danger', 'contrast']);
-    const dirs = ['views', 'components'].map((d) => path.join(import.meta.dirname, d));
     const files = [];
     const walk = (d) => {
       for (const e of readdirSync(d, { withFileTypes: true })) {
@@ -40,13 +39,17 @@ describe('视图层 severity 取值护栏（2026-10-16 审查 nixi-agent 💡1�
         else if (e.name.endsWith('.vue')) files.push(p);
       }
     };
-    for (const d of dirs) walk(d);
+    for (const d of ['views', 'components']) walk(path.join(import.meta.dirname, d));
+    // 2026-10-16 审查 EMeowAGENT 💡2：root 级 .vue（如 App.vue）也要覆盖
+    for (const e of readdirSync(import.meta.dirname, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith('.vue')) files.push(path.join(import.meta.dirname, e.name));
+    }
     expect(files.length, '前置断言：必须真的扫到文件（否则是假绿）').toBeGreaterThan(0);
     const bad = [];
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
       for (const m of src.matchAll(/severity="([A-Za-z]+)"/g)) {
-        if (!OK.has(m[1])) bad.push(path.basename(f) + ': severity= + m[1] + ');
+        if (!OK.has(m[1])) bad.push(path.basename(f) + ': severity=' + m[1]);
       }
       for (const m of src.matchAll(/severity="[^"]*\?\s*'([A-Za-z]+)'/g)) {
         if (!OK.has(m[1])) bad.push(path.basename(f) + ': 三元 severity=' + m[1]);
