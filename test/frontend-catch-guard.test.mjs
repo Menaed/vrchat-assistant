@@ -42,7 +42,7 @@ const BASELINE = [
   ['src/views/PrintsView.vue', 'else gallery.value = [];', '同上'],
   // 2026-10-16（a2 合并上游鉴权门 + 本仓 verifyToken 先验）：探测/校验异常时**保留登录门** ——
   // 语义就是「回到登录页」（本护栏头部第 ② 类例外），不是把失败写成「确实没有数据」✓
-  ['src/App.vue', 'loginView.value = true;   // 探测/校验异常 ⇒ 保留登录门（由登录页给出连接错误提示）', '鉴权探测/校验异常 ⇒ 保留登录门（回到登录页是安全默认；登录页会给出连接错误提示）'],
+  ['src/App.vue', 'loginView.value = true;', '鉴权探测/校验异常 ⇒ 保留登录门（回到登录页是安全默认）；同时已 console.warn 留痕，登录页本身只在提交时才报错'],
 ];
 
 function scan() {

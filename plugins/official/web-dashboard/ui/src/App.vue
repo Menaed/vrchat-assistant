@@ -135,8 +135,11 @@ onMounted(async () => {
     } else {
       store.authRequired = true;
     }
-  } catch {
-    loginView.value = true;   // 探测/校验异常 ⇒ 保留登录门（由登录页给出连接错误提示）
+  } catch (e) {
+    // 2026-10-16 审查 ⚠️2：这里原来完全静默 ⇒ 使用者只会「无任何解释地被弹回登录页」，且旧令牌没被清。
+    // 登录页的 error 只在用户点「登录」后才赋值，所以必须在这里留痕 ✓
+    console.warn('[auth] 探测/校验失败（保留登录门）:', e);
+    loginView.value = true;
   } finally {
     authChecking.value = false;
     // 兜底统一启动（幂等）：任何「已判定可进面板」的路径都必须起数据面，避免 api:0（「暂无动态」却无请求）

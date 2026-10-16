@@ -704,7 +704,7 @@ export function startDashboard() {
   // 2026-10-16（合并上游与本仓实现）：**保留上游的双门 + authRequired 语义**（未启用令牌的部署靠它放行数据面），
   // 同时套上本仓的「逐步独立兜底」——本函数此前是一条直线，任何一步抛错（实测首步 initFromHash 即抛）
   // 都会让后面的数据加载全部不执行 ⇒ 页面能渲染但 **api:0**（「暂无动态」却没有任何请求）✗ ✓
-  const step = (name, fn) => { try { fn(); } catch (e) { console.warn('[dashboard] 启动步骤失败 ' + name + ':', e); } };
+  const step = (name, fn) => { try { fn(); } catch (e) { console.warn('[dashboard] 启动步骤失败 ' + name + ':', e); } };   // 注意：某步失败**不会自动重试**（__dataStarted 在此之前已置位），需刷新页面 ✓
   // —— 本地初始化：不依赖鉴权，幂等 ——
   if (!__dashStarted) {
     __dashStarted = true;
