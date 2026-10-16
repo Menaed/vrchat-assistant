@@ -69,6 +69,13 @@ test('脱敏：中文校验码（验证码/校验码/动态码）覆盖，且不
   assert.ok(!natural2.includes('ABC123') && !natural2.includes('654321'), '纯空格分隔的码也必须打码');
   const noSwallow = redactSecrets('验证码：短信已发送到邮箱');
   assert.ok(noSwallow.includes('短信已发送到邮箱'), '分隔符后面是中文正文时**不得**吞掉（旧写法会整句遮掉）');
+  // 2026-10-16 审查 🔴1：**真实生产句子**（logging 现场形态）—— 验证码被双引号包裹，必须先遮住
+  const prod = redactSecrets('无效的验证码: "123456"，应为6位数字');
+  assert.ok(!prod.includes('123456'), '真实句子里的引号包裹验证码必须打码（上一版会漏 ✗）');
+  const prod2 = redactSecrets('无效的 TOTP 验证码: "ABC123"');
+  assert.ok(!prod2.includes('ABC123'), 'TOTP 形态同样必须打码');
+  const longTok = redactSecrets('验证码: "abcdefghijklmnop1234"');
+  assert.ok(!longTok.includes('abcdefghijklmnop1234'), '长码必须整段遮住（不得只遮前 10 位留下残片）');
   const paren = redactSecrets('验证码：123456（5分钟内有效）');
   assert.ok(paren.includes('[REDACTED]') && paren.includes('（5分钟内有效）'), '括号说明不得被吞');
   const prose = redactSecrets('请输入验证码 已发送到邮箱');
