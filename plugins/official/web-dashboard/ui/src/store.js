@@ -318,7 +318,8 @@ function cacheFresh(o) { return !!o && (Date.now() - (o.at || 0)) < CACHE_TTL_MS
 // 模块加载即 hydrate：早于 app mount ⇒ 首屏直接用上次数据填满（随后 load() 静默刷新）✓
 hydrateFromCache();
 // token 失效时清空缓存（避免把上个会话的数据显示给未登录/换号的用户）✓
-try { window.addEventListener('vrc-auth-401', () => clearDashCache()); } catch { /* SSR/测试环境无 window */ }
+let __saw401At = 0;
+try { window.addEventListener('vrc-auth-401', () => { __saw401At = Date.now(); clearDashCache(); }); } catch { /* SSR/测试环境无 window */ }
 
 // 首屏 hydrate：用上次的数据先把界面填满（好友/动态/概览），随后 load() 会静默刷新 ✓
 export function hydrateFromCache() {
@@ -346,6 +347,7 @@ export function hydrateFromCache() {
 }
 
 export async function load(quiet = false) {
+  const __roundStart = Date.now();
   const silent = quiet || store.feedEvents.length > 0;
   if (!silent) store.feedLoading = true;
   try {
@@ -406,7 +408,7 @@ export async function load(quiet = false) {
     }
     if (feedOk) store.feedHasMore = parsed.events.length >= 50;
     syncRightGroups();
-    writeCache({
+    if (okAny && __saw401At <= __roundStart) writeCache({
       friends: store.friends,
       feedEvents: store.feedEvents.slice(0, 50),
       feedTotal: store.feedTotal,
