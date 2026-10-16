@@ -31,7 +31,6 @@ vi.mock('./api.js', () => ({
 
 import TrackedView from './views/TrackedView.vue';
 import FriendsView from './views/FriendsView.vue';
-import UserDialog from './components/UserDialog.vue';
 import BoothView from './views/BoothView.vue';
 
 const mountOpts = { global: { stubs: { Teleport: true, Transition: true, TransitionGroup: true } } };

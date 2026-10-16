@@ -5,7 +5,7 @@
 //
 // 用法（需要先有一个开着调试端口的 Chrome/Edge，默认 9222）：
 //   node scripts/ui-view-tour.mjs                      # 用默认地址与视图清单
-//   DASH_URL=https://vrc.psen.cc/dashboard node scripts/ui-view-tour.mjs
+//   DASH_URL=https://<你的面板域名>/dashboard node scripts/ui-view-tour.mjs
 //   CDP_PORT=9222 node scripts/ui-view-tour.mjs
 // 判据：任一视图出现「子节点 0 / 文本为空 / .render-err / 失败横幅」⇒ 退出码 1 ✓
 //
@@ -23,7 +23,7 @@ async function main() {
     targets = await r.json();
   } catch (e) {
     console.error('无法连接调试端口', PORT, '-', e.message);
-    console.error('提示：先启动带 --remote-debugging-port 的浏览器（或 DSH 的 ego 浏览器）');
+    console.error('提示：先启动带 --remote-debugging-port 的 Chromium（Chrome/Edge），并保持已有登录态');
     process.exit(2);
   }
   const page = (targets || []).find((t) => t.type === 'page');
