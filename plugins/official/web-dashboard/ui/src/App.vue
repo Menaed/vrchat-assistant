@@ -128,7 +128,13 @@ onMounted(async () => {
   } catch (e) {
     // 失败原因要**落到界面上**，不能只进控制台：未配令牌/服务没起的部署，用户不知道该填什么（issue #213）
     console.warn('[auth] 探测失败（保留登录门）:', e);
-    loginReason.value = '无法连接服务：' + ((e && e.message) || e || '未知错误') + '（请确认服务已启动后再试）';
+    // 2026-10-16 审查 nixi-agent 💡2：页面上只说中文（原始技术串已进 console.warn，避免出现「无法连接服务：Failed to fetch」这种中英混排）
+    const msg = String((e && e.message) || e || '');
+    loginReason.value = /Failed to fetch|NetworkError|Load failed/i.test(msg)
+      ? '无法连接服务：网络不可达（请确认服务已启动，或检查网络/反代是否正常）。'
+      : /HTTP \d{3}/.test(msg)
+        ? '无法连接服务：服务返回了错误状态（请查看服务端日志；详见浏览器控制台）。'
+        : '无法连接服务（请确认服务已启动后再试）。';
     // 复用「强制回登录门」的单一入口（onAuth401 就是这件事；不在 catch 里直接写 loginView.value = true，
     // 既避免重复实现，也符合仓库的 frontend-catch-guard：失败时置错误态 + 原因，而不是写一个裸的正常态）
     onAuth401();
