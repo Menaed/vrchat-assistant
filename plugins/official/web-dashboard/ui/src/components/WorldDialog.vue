@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { store, closeWorld, openUser, copyText, openPreview, openInstance, openGroup } from '../store.js';
+import { store, closeWorld, openUser, copyText, openPreview, openInstance, openGroup, openWorld } from '../store.js';
 import { get, post, imgUrl } from '../api.js';
-import { date, dateTime, trustColor, parseLoc, instanceLabel } from '../utils.js';
+import { date, dateTime, time, trustColor, parseLoc, instanceLabel } from '../utils.js';
 import { toast } from '../toast.js';
 import { confirm } from '../confirm.js';
 
