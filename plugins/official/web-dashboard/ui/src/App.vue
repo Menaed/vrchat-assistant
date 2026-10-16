@@ -129,7 +129,9 @@ onMounted(async () => {
     // 失败原因要**落到界面上**，不能只进控制台：未配令牌/服务没起的部署，用户不知道该填什么（issue #213）
     console.warn('[auth] 探测失败（保留登录门）:', e);
     loginReason.value = '无法连接服务：' + ((e && e.message) || e || '未知错误') + '（请确认服务已启动后再试）';
-    loginView.value = true;
+    // 复用「强制回登录门」的单一入口（onAuth401 就是这件事；不在 catch 里直接写 loginView.value = true，
+    // 既避免重复实现，也符合仓库的 frontend-catch-guard：失败时置错误态 + 原因，而不是写一个裸的正常态）
+    onAuth401();
   } finally {
     authChecking.value = false;
   }
