@@ -9,7 +9,7 @@
  * 而当前 `constants/event-types.js` 把 label / icon / severity 混在同一批对象里，无法安全地按形状区分。
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const SRC = readFileSync(path.join(import.meta.dirname, 'constants', 'event-types.js'), 'utf8');
@@ -23,5 +23,35 @@ describe('事件徽章 severity 护栏（定点）', () => {
 
   it('「状态变更」用的合法 warn 仍在（别把修复改回去）', () => {
     expect(SRC).toMatch(/status:\s*'warn'/);
+  });
+});
+
+// 2026-10-16 审查 nixi-agent 💡1：同一错值在【视图层】还有 7 处 Button 曾写 warning（已改 warn），
+// 而上面那条护栏只扫 constants/event-types.js ⇒ 按他的意见把护栏扩到视图层。
+describe('视图层 severity 取值护栏（2026-10-16 审查 nixi-agent 💡1）', () => {
+  it('src/views 与 src/components 下的 .vue 不得出现非法 severity 值', () => {
+    const OK = new Set(['secondary', 'success', 'info', 'warn', 'danger', 'contrast']);
+    const dirs = ['views', 'components'].map((d) => path.join(import.meta.dirname, d));
+    const files = [];
+    const walk = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith('.vue')) files.push(p);
+      }
+    };
+    for (const d of dirs) walk(d);
+    expect(files.length, '前置断言：必须真的扫到文件（否则是假绿）').toBeGreaterThan(0);
+    const bad = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      for (const m of src.matchAll(/severity="([A-Za-z]+)"/g)) {
+        if (!OK.has(m[1])) bad.push(path.basename(f) + ': severity= + m[1] + ');
+      }
+      for (const m of src.matchAll(/severity="[^"]*\?\s*'([A-Za-z]+)'/g)) {
+        if (!OK.has(m[1])) bad.push(path.basename(f) + ': 三元 severity=' + m[1]);
+      }
+    }
+    expect(bad, '非法 severity：' + bad.join(' / ')).toEqual([]);
   });
 });
