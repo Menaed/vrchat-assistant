@@ -5,7 +5,6 @@ import { time, date, dateTime, avatarLabel , reltime, statusLabels, trustColor, 
 import { statusColor } from '../composables/useFriendGroups.js';
 import { openUser } from '../store.js';
 import { toast } from '../toast.js';
-import { confirm } from '../confirm.js';
 
 // 非好友追踪（VRCX-Luo 对齐）：历史非好友 + 手动添加追踪的用户，
 // 服务端每小时拉取资料/头像并记录 bio/status 变化（events 表 friend-update + source=poll）。
@@ -280,7 +279,7 @@ onMounted(load);
             <b :style="{ color: trustColor(x.trustLevel) }" :title="x.trustLevel ? ('信任等级：' + x.trustLevel) : ''">{{ x.displayName || x.userId }}</b><!-- 2026-09-22：非好友现在也有信任等级了（来自 tags ✓）⇒ 名字配色自动生效 ✓ + 悬停可看等级名 ✓（与好友页口径一致 ✓）-->
             <small><span class="fc-dot" :style="statusDotStyle(x.location)"></span>{{ x.statusDescription || statusText(x.status) }}<i v-if="platformIcon(x.platform)" class="pi fc-plat" :class="platformIcon(x.platform)" :title="platformLabel(x.platform)"></i><!-- 2026-09-22 用户报「平台图标是乱码」✗：漏了 pi（图标字体基础类）与 fc-plat（尺寸样式）⇒ 渲染成豆腐块 ✓；现与好友页写法完全一致 ✓ --></small>
             <small v-if="memoOf(x)" class="fc-memo" :title="memoOf(x)">{{ memoOf(x) }}</small>   <!-- 2026-09-22 用户：备注行放到在线行下面 ✓ -->
-<small class="tk-meta">
+<small>
                           <span v-if="lastChangeAt(x)">变化 {{ reltime(lastChangeAt(x)) }}</span><!-- 2026-09-22 用户：卡片一行放不下「上次资料变化」⇒ 用短的「变化」✓（弹窗空间够，那边保留全称 ✓） -->
                           <span v-if="lastChangeAt(x) && x.lastRefreshAt">·</span>
                           <span v-if="x.lastRefreshAt">上次检测 {{ fmtRefresh(x.lastRefreshAt) }}</span>
@@ -421,7 +420,8 @@ onMounted(load);
 .tc-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tc-chip { white-space: nowrap; }
 .tk-expand { flex: none; margin-left: auto; }
-.tk-expand .p-button { padding: 2px 6px; }
+/* 2026-10-16（审查 3）：.tk-expand 就在 Button 根元素上 ⇒ 后代选择器匹配不到自身 ✓ */
+.tk-expand.p-button { padding: 2px 6px; }
 /* 2) 时间列：等宽数字 + 稍宽，时间与内容对齐 */
 .tc-rail { width: 86px; font-variant-numeric: tabular-nums; }
 .tc-rail b, .tc-rail strong { font-size: 12.5px; color: var(--text); }
@@ -430,7 +430,6 @@ onMounted(load);
 .tc-body { flex: 1; min-width: 0; color: var(--text); }
 .tc-body > * { min-width: 0; }
 /* 4) 头像对：统一 24px 圆角，与全站 .av-thumb 一致 */
-.tc-avpair { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .tc-av { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-soft); }
 .tc-avnone { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-dim); }
 .tc-avlabel { font-size: 9px; color: var(--text-dim); }
@@ -446,7 +445,8 @@ onMounted(load);
 /* 2026-09-22 用户：有备注和没备注的块高度不一样 ✗ => 去掉我自加的 align-items:start，
    与好友页 .fg-body 完全一致（默认 stretch = 同一行卡片自动等高 ✓）*/
 .tk-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
-.tk-item:has(.tk-row.open) { grid-column: 1 / -1; }
+/* 2026-10-16（审查 2）：原写法引用已消失的 .tk-row.open ⇒ 永不命中、展开详情被挤在单列；改为按 .tk-detail 命中 ✓ */
+.tk-item:has(.tk-detail) { grid-column: 1 / -1; }
 
 /* ── tk-sub-oneline-2026-09-22（用户：「最近变化和上次检测可以放到一行吧？」）───────────
    元信息强制单行、超出省略；动作按钮随行尾对齐 ✓ */
@@ -480,10 +480,7 @@ onMounted(load);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
-.friend-card:hover { background: var(--surface-2); border-color: var(--border); }
 .fc-text { min-width: 0; }
-.fc-text b { display: block; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fc-text small { color: var(--text-dim); font-size: 11px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fc-memo { display: block; font-size: 10px; color: var(--accent); opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .fc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(1px); }
 .fc-plat {
@@ -507,4 +504,13 @@ onMounted(load);
 .tk-list > .tk-item { display: flex; flex-direction: column; }
 .tk-list > .tk-item > .friend-card { height: 100%; }
 
+
+/* 2026-10-16（审查 1 修正）：机械清理时误删了这些**仍被模板引用**的定义（.tc-slamp / .tc-sdesc / .tc-old / .tc-new / .tc-statusrow / .tc-sarr）⇒ 从 main 原样还原。教训：「已用类」的提取必须覆盖动态来源 ✓ */
+.tc-slamp { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent); border: 1.5px solid rgba(0,0,0,0.35); }
+.tc-sdesc { color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tc-sdesc.dim { color: var(--text-dim); font-weight: 400; }
+.tc-old { color: var(--text-dim); text-decoration: line-through; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-new { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-statusrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tc-sarr { color: var(--text-dim); font-size: 11px; flex: none; }
 </style>
