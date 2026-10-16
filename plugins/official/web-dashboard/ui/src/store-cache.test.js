@@ -25,6 +25,12 @@ beforeEach(() => {
     const u = String(url);
     const mk = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
     if (!u.includes('/api/dashboard')) return mk({});
+    if (mode === 'bootstrap401') {
+      // 2026-10-16（审查 💡1）：**判别形态** —— bootstrap 401 + 其余 500。
+      // 原先用「全部 401」时尾部请求的 401 会把缓存再清一遍（回写点之后）⇒ 变异下仍 PASS、咬不住。
+      if (u.includes('bootstrap')) { try { window.dispatchEvent(new Event('vrc-auth-401')); } catch {} return mk({}, 401); }
+      return mk({}, 500);
+    }
     if (mode === 'auth401') {
       // 真实 api.js 在 401 时会派发 vrc-auth-401 ⇒ 这里照实派发（store.js 的监听器据此清缓存）
       try { window.dispatchEvent(new Event('vrc-auth-401')); } catch { /* 事件构造失败则忽略 */ }
@@ -78,7 +84,7 @@ describe('首屏缓存（dashboard）', () => {
   it('⑤ 本轮 401 后不得回写（清空是终态；审查 🔴 复现场景 D）', async () => {
     seed({ friends: [{ userId: 'u1' }], at: Date.now() - 60 * 60_000 });
     const m = await loadStore();
-    mode = 'auth401';
+    mode = 'bootstrap401';   // 🔴 复现场景 D2 的判别形态（见审查 💡1）
     await m.load();
     expect(read(), 'token 失效后本轮回写必须被压住 ⇒ 缓存为空（清空是终态）').toBeNull();
   });
