@@ -1,16 +1,51 @@
-// @vitest-environment happy-dom
 /**
- * store-auth-entry.test.js —— 「数据面何时打开」的入口链路永久回归用例
+ * store-auth-entry.test.js —— 「数据面何时打开」的入口链路永久用例
  *
- * 立此用例的原因（2026-10-16 审查 EMeowAGENT 实测）：真实入口顺序是
+ * 立此用例的原因（2026-10-16 审查实测）：真实入口顺序是
  *   main.js: startDashboard() → app.mount('#app')
- * 而 startDashboard() 里 authed 若只看 getToken()，**有旧令牌时会在 verifyToken 之前就打开数据面**
- * （实测白打 13 个请求）—— 我上一版的探针把 store.js 换成了 mock，**没覆盖这条链路**。
+ * 而 startDashboard() 里 authed 若只看 getToken()，有旧令牌时会在 verifyToken 之前就打开数据面
+ * （实测白打 13 个请求）。
  *
- * 形态照审查方探针：驱动**真实 store.js**（不 mock 被测模块），只桩外围 IO（fetch 计数 + happy-dom 的 storage/DOM）。
- * 关键：这里**不 import App.vue**，而是像 App 那样在「校验通过」后置 store.authVerified = true 再调一次。
+ * ⚠️ 本文件**不使用 happy-dom**（2026-10-16 审查 🔴1）：happy-dom 只是 vitest 的**可选 peer**，
+ * ui/package.json 没声明它 ⇒ CI 的 npm ci --prefix ui 不会安装 ⇒ 任何声明「用 happy-dom 作测试环境」
+ * 的文件在 CI 里**起不了 worker**（护栏静默失效 + CI 变红）。注意：**连注释里都别写那条指令字面量**——
+ * vitest 会在文件头注释里正则匹配环境指令，写了就照样触发。
+ * ⇒ 自带最小 DOM/存储桩，在 import 被测模块之前装好（api.js 在模块期读 location/sessionStorage）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mkStorage = () => {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+    clear: () => { m.clear(); },
+    key: (i) => Array.from(m.keys())[i] ?? null,
+    get length() { return m.size; },
+  };
+};
+
+const listeners = {};
+globalThis.sessionStorage = mkStorage();
+globalThis.localStorage = mkStorage();
+globalThis.location = { search: '', hash: '', pathname: '/', href: 'http://localhost/' };
+globalThis.window = Object.assign(globalThis, {
+  addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); },
+  removeEventListener: () => {},
+  dispatchEvent: () => true,
+  matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+  innerWidth: 1280,
+  innerHeight: 800,
+});
+globalThis.document = {
+  title: '',
+  body: { appendChild: () => {} },
+  createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {}, select: () => {}, focus: () => {} }),
+  querySelector: () => null,
+  addEventListener: () => {},
+  execCommand: () => true,
+};
 
 const TOKEN_KEY = 'vrc_dashboard_token';
 let dashboardCalls = 0;
@@ -38,7 +73,7 @@ const tick = () => new Promise((r) => setTimeout(r, 20));
 describe('数据面打开的入口链路（main.js 先调 startDashboard 再 mount）', () => {
   it('① 无令牌 + main.js 首次调用 ⇒ 零数据请求（双门语义）', async () => {
     const m = await loadStore();
-    m.startDashboard();          // main.js:166
+    m.startDashboard();
     await tick();
     expect(dashboardCalls, '无令牌时不得发任何 /api/dashboard 请求').toBe(0);
   });
@@ -46,9 +81,9 @@ describe('数据面打开的入口链路（main.js 先调 startDashboard 再 mou
   it('② 带旧令牌 + main.js 首次调用（verifyToken 尚未执行）⇒ 仍为零请求（🔴 的核心断言）', async () => {
     sessionStorage.setItem(TOKEN_KEY, 'stale-token');
     const m = await loadStore();
-    m.startDashboard();          // main.js:166，此刻校验还没跑
+    m.startDashboard();
     await tick();
-    expect(dashboardCalls, '旧令牌在校验之前不得打开数据面（否则白打一堆 401）').toBe(0);
+    expect(dashboardCalls, '旧令牌在校验之前不得打开数据面').toBe(0);
   });
 
   it('③ 校验通过后（App 置 authVerified）再调 startDashboard ⇒ 数据面打开', async () => {
@@ -57,7 +92,7 @@ describe('数据面打开的入口链路（main.js 先调 startDashboard 再 mou
     m.startDashboard();
     await tick();
     expect(dashboardCalls).toBe(0);
-    m.store.authVerified = true;   // App.vue 在 verifyToken 成功后做的事
+    m.store.authVerified = true;
     m.startDashboard();
     await tick();
     expect(dashboardCalls, '校验通过后必须能起数据面（别修成永远不动）').toBeGreaterThan(0);
@@ -80,7 +115,7 @@ describe('数据面打开的入口链路（main.js 先调 startDashboard 再 mou
     m.startDashboard();
     await tick();
     expect(dashboardCalls).toBe(0);
-    m.store.authRequired = false;   // App.vue 在 probeAuthRequired() === false 时做的事
+    m.store.authRequired = false;
     m.startDashboard();
     await tick();
     expect(dashboardCalls, '未启用令牌的部署必须放行（上游原语义，不能丢）').toBeGreaterThan(0);
