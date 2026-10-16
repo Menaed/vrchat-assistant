@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { get, post } from '../api.js';
-import { time, date, dateTime, avatarLabel , reltime, statusLabels } from '../utils.js';
+import { time, date, dateTime, avatarLabel , reltime, statusLabels, trustColor } from '../utils.js';
 import { statusColor } from '../composables/useFriendGroups.js';
 import { openUser } from '../store.js';
 import { toast } from '../toast.js';
@@ -316,7 +316,7 @@ onMounted(load);
           <div class="tk-info">
             <b class="tk-name">
               <span v-if="x.status" class="tk-dot" :style="statusDotStyle(x.location)" :title="'当前状态：' + statusText(x.status)"></span>
-              {{ x.displayName || x.userId }}
+              <span :style="{ color: trustColor(x.trustLevel) }" :title="x.trustLevel ? ('信任等级：' + x.trustLevel) : ''">{{ x.displayName || x.userId }}</span><!-- 2026-10-16：非好友也有信任等级（来自 tags；上游 DTO 早已暴露 trustLevel，只是这页没用）⇒ 名字按信任色 + 悬停显示等级；与好友页（FriendsView 同名写法）口径一致 ✓ -->
               <Tag v-if="memoOf(x)" class="tk-memotag" :title="memoOf(x)">备注</Tag>
             </b>
             <small class="tk-sub">
