@@ -466,17 +466,6 @@ onMounted(load);
 /* ==== 以下样式整块抄自 FriendsView（用户 2026-09-22 要求「整个样式都抄过来」） ==== */
 
 /* 搜索框与右侧好友栏搜索统一 32px；几何全写死不随字体加载伸缩 */
-.friend-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: var(--surface);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
 .fc-text { min-width: 0; }
 .fc-memo { display: block; font-size: 10px; color: var(--accent); opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .fc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(1px); }
