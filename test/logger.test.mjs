@@ -74,6 +74,9 @@ test('脱敏：中文校验码（验证码/校验码/动态码）覆盖，且不
   assert.ok(!prod.includes('123456'), '真实句子里的引号包裹验证码必须打码（上一版会漏 ✗）');
   const prod2 = redactSecrets('无效的 TOTP 验证码: "ABC123"');
   assert.ok(!prod2.includes('ABC123'), 'TOTP 形态同样必须打码');
+  // 2026-10-16 审查（另一条 💡）：真实调用点还会**拼接**上一层 message（`start-monitor.js:902`）—— 一起钉住
+  const composed = redactSecrets('启动登录失败：无效的验证码: "123456"，应为6位数字');
+  assert.ok(!composed.includes('123456'), '拼接句里的验证码也必须打码（真实落盘形态）');
   const longTok = redactSecrets('验证码: "abcdefghijklmnop1234"');
   assert.ok(!longTok.includes('abcdefghijklmnop1234'), '长码必须整段遮住（不得只遮前 10 位留下残片）');
   const paren = redactSecrets('验证码：123456（5分钟内有效）');
