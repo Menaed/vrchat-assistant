@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { get } from '../api.js';
+import { LOG_KINDS, LOG_KIND_LABEL } from '../constants/log-kinds.js';
 import { time, date } from '../utils.js';
 import { toast } from '../toast.js';
 
@@ -21,13 +22,8 @@ const SOURCES = [
   { v: 'db', l: '数据库' },
   { v: 'file', l: '文件' },
 ];
-const KINDS = [
-  { v: 'all', l: '全部' },
-  { v: 'auth', l: '认证' },
-  { v: 'ws', l: '连接' },
-  { v: 'ops', l: '运维' },
-];
-const KIND_LABEL = { auth: '认证', ws: '连接', ops: '运维' };
+const KINDS = LOG_KINDS;
+const KIND_LABEL = LOG_KIND_LABEL;
 const LEVELS_FILTER = [
   { v: 'all', l: '全部' },
   { v: 'warn', l: '警告+' },
@@ -114,11 +110,11 @@ function onQInput() {
 // 时间统一走 utils（本地时区），与动态页一致——此前直接切 ISO 字符串显示的是 UTC（用户反馈）
 const shown = computed(() => items.value || []);
 
-// 顶栏说明随来源切换：数据库=认证/连接/运维打点；文件=monitor.log 完整日志
+// 顶栏说明随来源切换：数据库=五类生命周期打点；文件=monitor.log 完整日志
 const lvNote = computed(() =>
   src.value === 'file'
     ? 'monitor.log 完整文件日志 · 级别 / 标签 / 关键词筛选'
-    : '认证 / 连接 / 运维生命周期打点 · 保留最近 500 条'
+    : '认证 / 连接 / 运维 / 接口 / 外部服务生命周期打点 · 保留最近 500 条'
 );
 
 onMounted(() => {
@@ -169,7 +165,7 @@ onUnmounted(() => {
       <div v-for="(x, i) in shown" :key="(src === 'file' ? 'f' : 'd') + '-' + i + '-' + x.ts" class="lv-row">
         <span class="lv-time mono" :title="rowTime(x)">{{ time(rowTime(x)) }}<small>{{ date(rowTime(x)) }}</small></span>
         <template v-if="src === 'db'">
-          <Tag :value="KIND_LABEL[x.kind] || x.kind" :severity="x.kind === 'ws' ? 'info' : 'contrast'" rounded />
+          <Tag :value="KIND_LABEL[x.kind] || x.kind" :severity="x.kind === 'ws' ? 'info' : 'secondary'" rounded />
         </template>
         <template v-else>
           <Tag :value="x.name" severity="info" rounded class="lv-name" />

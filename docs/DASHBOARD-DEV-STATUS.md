@@ -997,3 +997,9 @@ status；`user-update + trust_level` 也是 status ⇒ `trustLevel` 只认 `frie
 `npm test`、`test-registry`、`check-doc-drift`、ui `vitest run` 全部通过
 （**具体用例数随仓库演进而变，不写死在这里**）。生产实测：`?updateTypes=bio` 一次请求 196ms 返回
 10 条全为 bio（total 79；未过滤 total 21538）。
+
+## 2026-10-13 服务日志页补齐「接口 / 外部服务」两个类别
+
+- **现象**：`ops_log` 表的 kind 由 `core/ops-log.js` 定义为五类（auth / ws / ops / api / ext），而日志页「数据库」来源只映射并提供了 认证 / 连接 / 运维 三个筛选项 ⇒ `api`（VRChat REST 调用失败/超时，生产实测 138 条）与 `ext`（外部服务失败/降级）的行**没有中文类别**，模板回落到显示英文 `api`，顶部也没有对应筛选。
+- **修法**：`ui/src/views/LogsView.vue` 的 `KINDS` 增加「接口 / 外部服务」，`KIND_LABEL` 补齐五类，顶栏说明同步为「认证 / 连接 / 运维 / 接口 / 外部服务生命周期打点」；**后端无需改动** —— `get_ops_log` 与 `storage.getOpsLog` 本就按 `kind` 原样 `WHERE kind = $kind` 过滤。
+- **触发**：用户看到动态流一条「未知事件」（VRChat 推来一帧缺 `type` 的消息 ⇒ `ws-manager` 记为 `unknown`、载荷空对象）后追问，顺带核对日志页发现上述缺口。
