@@ -33,6 +33,7 @@ const WORLD_FETCH_COOLDOWN_MS = Number.isFinite(WORLD_FETCH_COOLDOWN_RAW) && WOR
 // 一个永久 404/不可见的世界会在每次 friends 请求里被反复回源（前端 120s 轮询 → 最坏每 ~2 分钟一次）。
 // 内存 Map 即可（重启即重置 → 重试一次，可接受）；无 schema 变更。
 const worldFetchCooldown = new Map(); // worldId -> lastAttemptAt
+// worldId -> VRChat 对当前账号返回 404/403（不可见/已下架）。注意：实测 404 可能是**暂时**的（同一批世界 8 分钟后重试即 200）⇒ 只作「本次取不到」的标注，取到即撤销
 const worldUnavailable = new Set();
 const worldFetchInflight = new Map();   // worldId -> 正在进行的回源 Promise（并发去重）
 /** 同一世界在同一时刻只发一次回源（复审 ⚠️：dashboard.events 与 dashboard.friends 会在同一轮 bootstrap 的
@@ -44,7 +45,7 @@ function worldFetchOnce(worldSvc, worldId) {
     worldFetchInflight.set(worldId, p);
   }
   return p;
-}  // worldId -> VRChat 对当前账号返回 404/403（不可见/已下架）。注意：实测 404 可能是**暂时**的（同一批世界 8 分钟后重试即 200）⇒ 只作「本次取不到」的标注，取到即撤销
+}
 
 // world_cache.updated_at 由 SQLite datetime('now') 写入（UTC、无时区后缀）→ 补 Z 再解析。
 // 注意（审查 💡2）：updated_at 是「行被写过」的时间，setWorldNote/setWorldFavorited 也会刷新它而
@@ -394,7 +395,9 @@ export function registerDashboardServices(loader, ctx) {
           const loc = cj.location || '';
           // 用 startsWith 而不是 === ：线上「传送中」的形态是 traveling:traveling（2026-09-25 实测），
           // 精确匹配会漏 ⇒ prev 落在没有 world 对象的那条上 ⇒ 左端「从哪」的世界名/图全空。
-          if (!loc || loc.startsWith('traveling') || loc === 'offline' || loc === 'offline:offline') continue;
+          // 用户 2026-10-17 定：左端只显示**紧邻的上一个位置**，不得为了凑名字回退到更早的世界。
+          if (!loc || loc.startsWith('traveling')) continue;   // traveling 没有地点，继续往前找
+          if (loc === 'offline' || loc === 'offline:offline') return null;   // 上一刻离线 ⇒ 没有「从哪」
           const worldId = cj.world?.id || (loc.startsWith('wrld_') ? loc.split(':')[0] : '');
           // 缓存优先（与右端同口径）⇒ 私人房也能显示世界名与缩略图
           const cachedName = row.wc_name || '';
@@ -1305,7 +1308,7 @@ export function registerDashboardServices(loader, ctx) {
       return fresh ? { ...fresh, note: cached.note || '', unavailable: worldUnavailable.has(worldId) } : { ...pick(cached), tags: cachedTags, note: cached.note || '', unavailable: worldUnavailable.has(worldId) };
     }
     const fresh = await fetchFresh().catch(() => null);
-    return fresh || { worldId, name: '', unavailable: worldUnavailable.has(worldId) };
+    return { ...(fresh || { worldId, name: '' }), unavailable: worldUnavailable.has(worldId) };
   });
   loader.serviceOwners.set('dashboard.world', 'core');
 
