@@ -1616,16 +1616,24 @@ export function registerDashboardServices(loader, ctx) {
     };
   });
   loader.serviceOwners.set('dashboard.dynamicStatusGet', 'core');
-  loader.services.set('dashboard.dynamicStatusSet', ({ enabled, template, syncNow = true } = {}) => {
+  // ⚠️ 这里必须是 async：await_handle_sync 返回 Promise，同步 service 会把它原样塞进响应
+  // （JSON 序列化成 {}）⇒ 面板永远拿不到 syncResult（action/reason），「保存并立即同步」形同没同步。
+  loader.services.set('dashboard.dynamicStatusSet', async ({ enabled, mode, template, separator, syncNow = true } = {}) => {
     const sync = ctx.statusSync;
     if (!sync) return { ok: false, error: 'status-sync 未初始化' };
     if (enabled !== undefined && typeof enabled !== 'boolean') return { ok: false, error: 'enabled 必须是 boolean' };
     if (template !== undefined && typeof template !== 'string') return { ok: false, error: 'template 必须是 string' };
+    if (mode !== undefined && mode !== 'fixed' && mode !== 'suffix') return { ok: false, error: 'mode 必须是 fixed / suffix' };
+    if (separator !== undefined && typeof separator !== 'string') return { ok: false, error: 'separator 必须是 string' };
     const config = sync.setConfig({
       ...(enabled !== undefined ? { enabled } : {}),
+      ...(mode !== undefined ? { mode } : {}),
       ...(template !== undefined ? { template } : {}),
+      ...(separator !== undefined ? { separator } : {}),
     });
-    const syncResult = syncNow ? await_handle_sync(sync, config.enabled) : { action: 'skipped', reason: 'not-sync-now' };
+    // ⚠️ 这里必须 await：await_handle_sync 是 async 函数，漏掉 await 会把 Promise 直接放进响应
+    // （JSON 序列化成 {}）⇒ 面板拿不到 syncResult（action/reason/statusDescription）。
+    const syncResult = syncNow ? await await_handle_sync(sync, config.enabled) : { action: 'skipped', reason: 'not-sync-now' };
     return { ok: true, config, syncResult };
   });
   loader.serviceOwners.set('dashboard.dynamicStatusSet', 'core');
