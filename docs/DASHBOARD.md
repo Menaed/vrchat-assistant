@@ -112,6 +112,7 @@ Authorization: Bearer <VRC_MONITOR_AUTH_TOKEN>
 - **后端错峰预热**：插件注册后 30 秒启动，每 10 分钟一轮，逐项间隔 15 秒提前拉取我的模型 / 屏蔽管理 / 收藏好友填充缓存（避免集中占满限流队列）；用户首次打开即命中缓存。
 - **我的模型 stale-while-revalidate**：avatars 接口在有旧缓存但过期时，先秒回旧数据、后台异步刷新，任何场景都不白等；同时 `/auth/user`（uid/当前模型）缓存 5 分钟，冷缓存时省 1 个限流请求。
 - **前端视图缓存**：`get()` 对慢视图接口（home/favorites/avatars/moderation/notifications/recent-worlds/stats）做 60 秒前端缓存——切走再切回时秒显旧数据并后台刷新；通知的标记已读 / 接受 / 拒绝等写操作后主动失效对应缓存，避免显示旧数据。轮询接口（overview/friends/events）不缓存，保持实时。
+> 2026-10-16 补充（PR #291 首屏缓存）：**首屏渲染**例外 —— 上一次的概览/好友/动态会先从 `localStorage` （stale-while-revalidate）渲染，随后仍由接口**覆盖为权威数据**；失败轮次不写缓存、token 失效清缓存。
 - **视图切换竞态保护**：`viewToken` 机制——切换视图后旧请求的异步响应若 token 不匹配则丢弃，不再出现“切到模型页后被收藏结果覆盖跳回”的问题。
 
 ## 验证

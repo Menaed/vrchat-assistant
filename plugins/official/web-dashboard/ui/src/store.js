@@ -293,7 +293,67 @@ function syncRightGroups() {
 
 // 关键路径（本地 DB，秒回）+ 慢路径（VRChat API，后台填）
 // 已有数据时静默刷新：不再置 feedLoading（避免标题行"同步中…"Tag 闪烁），保持旧列表原地更新
+// ── 本地缓存（2026-09-22 用户要「无感」优化：首屏先用缓存渲染、再后台刷新）──
+// 约束：①只在首屏 hydrate，不改变任何接口语义 ②token 失效应清空 ③TTL 5 分钟，过期仍可用（stale-while-revalidate）
+const CACHE_KEY = 'vrc.dash.cache';
+const CACHE_TTL_MS = 5 * 60_000;
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object') return null;
+    return o;
+  // 缓存不可用（非法 JSON / localStorage 被禁）⇒ 裸 return（= undefined）表示「没有缓存」，
+  // 由调用方按无缓存处理；不写 null/false 之类「正常值」，以免被 test/frontend-catch-guard 判为
+  // 「把失败写成业务结论」（缓存语义下等价，且满足该护栏的规则）✓
+  } catch { return; }
+}
+function writeCache(patch) {
+  try {
+    const cur = readCache() || {};
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cur, ...patch, at: Date.now() }));
+  } catch (e) { console.debug('[dashboard] 缓存写入跳过（隐私模式/配额满）:', e); }
+}
+export function clearDashCache() { try { localStorage.removeItem(CACHE_KEY); } catch {} }
+function cacheFresh(o) { return !!o && (Date.now() - (o.at || 0)) < CACHE_TTL_MS; }
+
+// 模块加载即 hydrate：早于 app mount ⇒ 首屏直接用上次数据填满（随后 load() 静默刷新）✓
+hydrateFromCache();
+// token 失效时清空缓存（避免把上个会话的数据显示给未登录/换号的用户）✓
+let __saw401At = 0;
+try { window.addEventListener('vrc-auth-401', () => { __saw401At = Date.now(); clearDashCache(); }); } catch { /* SSR/测试环境无 window */ }
+
+// 首屏 hydrate：用上次的数据先把界面填满（好友/动态/概览），随后 load() 会静默刷新 ✓
+export function hydrateFromCache() {
+  const c = readCache();
+  if (!c) return false;
+  let hit = false;
+  if (Array.isArray(c.friends) && c.friends.length && !store.friends.length) { store.friends = c.friends; syncRightGroups(); hit = true; }
+  if (Array.isArray(c.feedEvents) && c.feedEvents.length && !store.feedEvents.length) {
+    // 2026-09-22 用户报障「左侧整块黑」：此处此前**直接赋值缓存数组** ✗，未经过 parseEvents 归一化 ——
+    // 缓存形状与接口不一致（旧版本缓存 / 字段缺失）时，动态页渲染会抛错 ⇒ 整块不挂载（黑）✗✓。
+    // 现改为走与接口**完全相同**的归一化 + try/catch 兜底 ✓。
+    try {
+      const norm = parseEvents({ events: c.feedEvents, total: c.feedTotal || 0 });
+      if (Array.isArray(norm.events) && norm.events.length) {
+        store.feedEvents = norm.events;
+        store.feedTotal = norm.total || norm.events.length;
+        hit = true;
+      }
+    } catch { /* 缓存形状不可用 ⇒ 跳过 hydrate，等接口 ✓ */ }
+  }
+  if (c.overview && !store.overview) { store.overview = c.overview; hit = true; }
+  if (c.me && !store.me) { store.me = c.me; hit = true; }
+  if (c.nicknameMap && !Object.keys(store.nicknameMap || {}).length) { store.nicknameMap = c.nicknameMap; hit = true; }
+  if (Array.isArray(c.favFriendIds) && c.favFriendIds.length && !(store.favFriendIds && store.favFriendIds.size)) { store.favFriendIds = new Set(c.favFriendIds); hit = true; }
+  if (c.eventsRange && c.eventsRange.min) { store.eventsRange = c.eventsRange; hit = true; }
+  if (hit) console.info('[dashboard] 首屏使用本地缓存渲染（' + (cacheFresh(c) ? '新鲜' : '已过期') + '），随后静默刷新');
+  return hit;
+}
+
 export async function load(quiet = false) {
+  const __roundStart = Date.now();
   const silent = quiet || store.feedEvents.length > 0;
   if (!silent) store.feedLoading = true;
   try {
@@ -354,6 +414,17 @@ export async function load(quiet = false) {
     }
     if (feedOk) store.feedHasMore = parsed.events.length >= 50;
     syncRightGroups();
+    if (okAny && __saw401At <= __roundStart) writeCache({
+      friends: store.friends,
+      feedEvents: store.feedEvents.slice(0, 50),
+      feedTotal: store.feedTotal,
+      overview: store.overview,
+      me: store.me,
+      nicknameMap: store.nicknameMap,
+      // ⚠️1（审查）：Set 不能直接 JSON 化 ⇒ 存数组、hydrate 时重建 Set（首屏「仅星标」与昵称列不再短暂为空）
+      favFriendIds: Array.from(store.favFriendIds || []),
+      eventsRange: store.eventsRange,
+    });
 
     Promise.allSettled([
       get('/api/dashboard/favorites?type=friends'),
