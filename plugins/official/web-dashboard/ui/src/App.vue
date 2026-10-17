@@ -49,7 +49,7 @@ import GroupDialog from './components/GroupDialog.vue';
 import InstanceDialog from './components/InstanceDialog.vue';
 import AvatarDialog from './components/AvatarDialog.vue';
 import LoginView from './components/LoginView.vue';
-import { hasToken, clearToken, probeAuthRequired } from './api.js';
+import { hasToken, clearToken, probeAuthRequired, verifyToken, getToken } from './api.js';
 import { useConfirm } from 'primevue/useconfirm';
 import { bindConfirm } from './confirm.js';
 
@@ -109,22 +109,41 @@ onMounted(() => document.addEventListener('scroll', onAnyScroll, true));
 
 // ── 登录页控制 ──
 const loginView = ref(!hasToken());
-// 本地无 token 时先裸探测服务端是否真的要令牌（api.js probeAuthRequired）：
-// 未启用鉴权（单机默认）→ 直接进面板，不再逼用户输入一个从未配置过的令牌（issue #213）；
-// 探测失败（服务未启动 / 网络异常）保留登录门，由登录页给出连接错误提示。
-const authChecking = ref(loginView.value);
+// 两条路径都要处理，缺一不可（2026-10-16 合并上游与本仓实现）：
+//  ① 本地**无** token ⇒ 先裸探测服务端是否真的要令牌（api.js probeAuthRequired）：
+//     未启用鉴权（单机默认）⇒ 直接进面板，不再逼用户输入一个从未配置过的令牌（issue #213）；
+//     探测失败（服务未启动 / 网络异常）⇒ 保留登录门，由登录页给出连接错误提示。
+//  ② 本地**有**旧 token ⇒ 必须先 verifyToken 验一次再挂主界面：
+//     否则主界面会立刻把全部数据请求并发打出去、全部 401 之后才跳回登录页（用户 2026-09-22 报障：
+//     「没登录为什么也发请求 + 首屏非常慢」）⇒ 失败就清 token 回登录页 ✓。
+// 因此进入本组件时**统一先显示检查中**（authChecking=true），两条路径都在 onMounted 里定论 ✓。
+const authChecking = ref(true);
 onMounted(async () => {
-  if (!loginView.value) return;
   try {
-    if (!(await probeAuthRequired())) {
+    if (hasToken()) {
+      if (await verifyToken(getToken())) {
+        store.authVerified = true;   // 🔴1：校验通过才允许数据面打开（main.js 那次调用会因此空跑、零请求）
+        store.authRequired = true;
+        loginView.value = false;
+      } else {
+        clearToken();
+        loginView.value = true;
+      }
+    } else if (!(await probeAuthRequired())) {
       store.authRequired = false;   // 服务端不需要鉴权 => 放行数据加载（否则未启用令牌的部署会零请求）
       loginView.value = false;
     } else {
       store.authRequired = true;
     }
-    if (!loginView.value) startDashboard();   // 2026-09-22：登录成功后才拉数据（登录页此前会打全部接口 ✗）
-  } catch { /* 保留登录门 */ } finally {
+  } catch (e) {
+    // 2026-10-16 审查 ⚠️2：这里原来完全静默 ⇒ 使用者只会「无任何解释地被弹回登录页」，且旧令牌没被清。
+    // 登录页的 error 只在用户点「登录」后才赋值，所以必须在这里留痕 ✓
+    console.warn('[auth] 探测/校验失败（保留登录门）:', e);
+    loginView.value = true;
+  } finally {
     authChecking.value = false;
+    // 兜底统一启动（幂等）：任何「已判定可进面板」的路径都必须起数据面，避免 api:0（「暂无动态」却无请求）
+    if (!loginView.value) startDashboard();
   }
 });
 function onAuth401() { loginView.value = true; }
