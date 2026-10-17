@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { store, setView, openUser, openWorld, openPreview, loadMoreFeed, copyText, openGroup, resetFeed } from '../store.js';
-import { time, date, locLabel, locLabelFull, specialLocationLabel, parseLoc, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
+import { time, date, locLabel, specialLocationLabel, parseLoc, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
 import { post } from '../api.js';
 import { toast } from '../toast.js';
 import { statusColor } from '../composables/useFriendGroups.js';
@@ -27,6 +27,18 @@ function sourceLabel(s) {
 
 function prevLabelOf(e) { return specialLocationLabel(e.previousLocation) || e.previousWorldName || ''; }
 function curIsWorld(e) { return String(e.worldId || '').startsWith('wrld_'); }
+// 左端（上一个位置）的实例信息：公开 · US · 36146（用户 2026-09-24 定「公开房间那侧要显示图像世界名和房间号」）。
+// 与目的地那侧的 inst 口径一致：都走 parseLoc + instanceLabel（不再用 locLabelFull 的整串文案）。
+// 与 locLabelFull 的**有意差异**（2026-10-16 审查 nixi-agent 2，已确认）：
+// 对「有 region、但没有实例类型 token、房间号为空」的畸形串（如 wrld_abc:~region(us) / local:~region(jp)），
+// locLabelFull 会渲染一个**只含国家**的 chip（US），实测 288 条语料里 14 条属这一类；本函数**不产出 chip**（返回空）——
+// 理由：只写国家没有信息量，且真实 VRChat 位置串形如 wrld_x:12345~region(us)、不会命中这一类。
+// 这是刻意的行为差异，不是「同口径替换」的遗漏。
+function prevInstLabel(e) {
+  const p = parseLoc(e.previousLocation || '');
+  if (!p || !p.type) return '';
+  return [instanceLabel(p.type), p.region ? p.region.toUpperCase() : '', p.instanceId || ''].filter(Boolean).join(' · ');
+}
 
 
 /* ── 类型定义（对齐 VRCX Feed filters：GPS/Online/Offline/Status/Avatar/Bio）── */
@@ -443,16 +455,20 @@ onUnmounted(() => {
             </template>
             <template v-else>
             <template v-if="prevLabelOf(x) && (curIsWorld(x) ? prevLabelOf(x) !== x.worldName : true)">
-              <img v-if="x.previousWorldImageUrl" class="wthumb" :src="x.previousWorldImageUrl" alt="" loading="lazy" />
-              <span v-if="x.previousWorldId" class="world-link" @click="openWorld(x.previousWorldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.previousWorldId)">{{ x.previousWorldName }}</span>
-              <span v-else class="dim">{{ prevLabelOf(x) }}</span>
-              <span v-if="locLabelFull(x.previousLocation)" class="inst mono">{{ locLabelFull(x.previousLocation) }}</span>
-              <span class="arr">→</span>
+              <span class="src-group">
+                <img v-if="x.previousWorldImageUrl" class="wthumb" :src="x.previousWorldImageUrl" alt="" loading="lazy" />
+                <span v-if="x.previousWorldId" class="world-link" @click="openWorld(x.previousWorldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.previousWorldId)">{{ x.previousWorldName }}</span>
+                <span v-else class="dim">{{ prevLabelOf(x) }}</span>
+                <span v-if="prevInstLabel(x)" class="inst mono">{{ prevInstLabel(x) }}</span>
+                <span class="arr">→</span>
+              </span>
             </template>
-            <img v-if="x.worldImageUrl" class="wthumb" :src="x.worldImageUrl" alt="" loading="lazy" />
-            <span v-if="x.worldName" class="world-link" @click="openWorld(x.worldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.worldId)">{{ x.worldName }}</span>
-            <span v-else-if="x.location" class="dim">{{ specialLocationLabel(x.location) || locLabel(x.location) || x.location }}</span>
-            <span v-if="x.instanceType || x.region || x.instanceId" class="inst mono">{{ instanceLabel(x.instanceType) }}{{ x.region ? ' · ' + x.region.toUpperCase() : '' }}{{ x.instanceId ? ' · ' + x.instanceId : '' }}</span>
+            <span class="dest-group">
+              <img v-if="x.worldImageUrl" class="wthumb" :src="x.worldImageUrl" alt="" loading="lazy" />
+              <span v-if="x.worldName" class="world-link" @click="openWorld(x.worldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.worldId)">{{ x.worldName }}</span>
+              <span v-else-if="x.location" class="dim">{{ specialLocationLabel(x.location) || locLabel(x.location) || x.location }}</span>
+              <span v-if="x.instanceType || x.region || x.instanceId" class="inst mono">{{ instanceLabel(x.instanceType) }}{{ x.region ? ' · ' + x.region.toUpperCase() : '' }}{{ x.instanceId ? ' · ' + x.instanceId : '' }}</span>
+            </span>
             </template>
           </template>
 
@@ -837,6 +853,8 @@ onUnmounted(() => {
 }
 .uicon { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; }
 .world-link:hover { background: color-mix(in srgb, var(--accent-2) 22%, transparent); }
+/* 2026-10-16 恢复（用户 2026-09-24 定案）：目的地/来源各绑成一组 ⇒ 房间信息不再被世界名挤到第二行 */
+.dest-group, .src-group { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .inst { color: var(--text-dim); font-size: 10.5px; background: var(--surface-3); padding: 1px 6px; border-radius: 5px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
 /* 状态灯 */
