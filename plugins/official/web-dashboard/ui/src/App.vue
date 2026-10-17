@@ -112,11 +112,13 @@ const loginView = ref(!hasToken());
 // 两条路径都要处理，缺一不可（2026-10-16 合并上游与本仓实现）：
 //  ① 本地**无** token ⇒ 先裸探测服务端是否真的要令牌（api.js probeAuthRequired）：
 //     未启用鉴权（单机默认）⇒ 直接进面板，不再逼用户输入一个从未配置过的令牌（issue #213）；
-//     探测失败（服务未启动 / 网络异常）⇒ 保留登录门，由登录页给出连接错误提示。
+//     探测失败（服务未启动 / 网络异常）⇒ 保留登录门，并把原因透出到登录页（#297 / issue #213 的 UX 项）。
 //  ② 本地**有**旧 token ⇒ 必须先 verifyToken 验一次再挂主界面：
 //     否则主界面会立刻把全部数据请求并发打出去、全部 401 之后才跳回登录页（用户 2026-09-22 报障：
 //     「没登录为什么也发请求 + 首屏非常慢」）⇒ 失败就清 token 回登录页 ✓。
 // 因此进入本组件时**统一先显示检查中**（authChecking=true），两条路径都在 onMounted 里定论 ✓。
+// #297：探测失败的原因要透出到登录页 —— 此前只 console.warn，用户看到的是一个没有任何解释的登录页。
+const loginReason = ref('');
 const authChecking = ref(true);
 onMounted(async () => {
   try {
@@ -139,6 +141,15 @@ onMounted(async () => {
     // 2026-10-16 审查 ⚠️2：这里原来完全静默 ⇒ 使用者只会「无任何解释地被弹回登录页」，且旧令牌没被清。
     // 登录页的 error 只在用户点「登录」后才赋值，所以必须在这里留痕 ✓
     console.warn('[auth] 探测/校验失败（保留登录门）:', e);
+    // #297（issue #213）：失败原因还要**落到界面上**，不能只进控制台 —— 未配令牌 / 服务没起的部署，
+    // 用户不知道该填什么。页面上只说中文（原始技术串已进 console.warn，避免「无法连接服务：Failed to fetch」中英混排）
+    const msg = String((e && e.message) || e || '');
+    loginReason.value = /Failed to fetch|NetworkError|Load failed/i.test(msg)
+      ? '无法连接服务：网络不可达（请确认服务已启动，或检查网络/反代是否正常）。'
+      : /HTTP \d{3}/.test(msg)
+        ? '无法连接服务：服务返回了错误状态（请查看服务端日志；详见浏览器控制台）。'
+        : '无法连接服务（请确认服务已启动后再试）。';
+    // 保留登录门（frontend-catch-guard 已把这条登记为「回到登录页」的安全默认例外）
     loginView.value = true;
   } finally {
     authChecking.value = false;
@@ -200,7 +211,7 @@ async function refresh() {
     <i class="pi pi-spin pi-spinner"></i>
     <span>正在检查访问鉴权…</span>
   </div>
-  <LoginView v-else-if="loginView" />
+  <LoginView v-else-if="loginView" :initial-error="loginReason" />
   <div v-else class="app-shell">
     <header class="app-header">
       <Button v-if="store.isMobile" icon="pi pi-bars" text rounded @click="store.navOpen = true" aria-label="打开菜单" />
