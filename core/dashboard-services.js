@@ -397,7 +397,9 @@ export function registerDashboardServices(loader, ctx) {
           // 精确匹配会漏 ⇒ prev 落在没有 world 对象的那条上 ⇒ 左端「从哪」的世界名/图全空。
           // 用户 2026-10-17 定：左端只显示**紧邻的上一个位置**，不得为了凑名字回退到更早的世界。
           if (!loc || loc.startsWith('traveling')) continue;   // traveling 没有地点，继续往前找
-          if (loc === 'offline' || loc === 'offline:offline') return null;   // 上一刻离线 ⇒ 没有「从哪」
+          // 上一刻离线 ⇒ 没有「从哪」。注意用 break 而不是 return：负结果也要走下面的 prevLocCache.set，
+          // 否则同一页里落在 offline 之后的多条行会各自重复扫一遍历史（2026-10-18 复审 💡2）。
+          if (loc === 'offline' || loc === 'offline:offline') { prev = null; break; }
           const worldId = cj.world?.id || (loc.startsWith('wrld_') ? loc.split(':')[0] : '');
           // 缓存优先（与右端同口径）⇒ 私人房也能显示世界名与缩略图
           const cachedName = row.wc_name || '';
