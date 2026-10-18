@@ -70,3 +70,26 @@ test('If-None-Match 为空串 / 不相关值 ⇒ 照常 200', () => {
   assert.equal(call(SMALL, { 'if-none-match': '' }).status, 200);
   assert.equal(call(SMALL, { 'if-none-match': '"0000000000000000"' }).status, 200);
 });
+
+// ── 2026-10-18 复审（EMeowAGENT @ #307）三条 ─────────────────────────────
+test('Vary: Accept-Encoding 必须出现在 304 与两个 200 分支（⚠️1：同一 ETag 描述 gzip/identity 两种表示）', () => {
+  const gz = { 'accept-encoding': 'gzip' };
+  const first = call(BIG, gz);
+  assert.equal(first.headers.Vary, 'Accept-Encoding', 'gzip 200 必须带 Vary（否则共享缓存可能把 gzip 表示回给不收 gzip 的客户端）');
+  const ident = call(BIG, { 'accept-encoding': 'identity' });
+  assert.equal(ident.headers.Vary, 'Accept-Encoding', 'identity 200 同样要带');
+  const hit = call(BIG, { ...gz, 'if-none-match': tagOf(first) });
+  assert.equal(hit.status, 304);
+  assert.equal(hit.headers.Vary, 'Accept-Encoding', '304 也要带 Vary（缓存据此判定表示能否复用）');
+});
+
+test('If-None-Match 为 * ⇒ 304（RFC 9110 §13.1.2：GET 语义下「已有任何表示」）', () => {
+  assert.equal(call(SMALL, { 'if-none-match': '*' }).status, 304);
+  assert.equal(call(BIG, { 'if-none-match': '*', 'accept-encoding': 'gzip' }).status, 304);
+});
+
+test('弱校验器（W/ 前缀）也命中：If-None-Match 走弱比较', () => {
+  const first = call(SMALL);
+  assert.equal(call(SMALL, { 'if-none-match': 'W/' + tagOf(first) }).status, 304);
+  assert.equal(call(SMALL, { 'if-none-match': '"deadbeefdeadbeef", W/' + tagOf(first) }).status, 304);
+});
