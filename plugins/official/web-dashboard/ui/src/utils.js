@@ -46,6 +46,8 @@ export function worldLabel(x) {
   return x.worldId || '未公开位置';
 }
 
+/** 特殊位置的中文名（不是"世界:实例"格式的那些值）：private→私人房间 / offline→离线 / traveling→传送中 / local→本地房间。
+ * 用途：位置行在拿不到世界名时的兜底标签（用户 2026-09-22 定：拿不到世界名就写"私人房间"）。 */
 export function specialLocationLabel(loc) {
   const v = String(loc || "").toLowerCase();
   // 纯特殊值直接给中文名（本地图 / 离线 / 传送）
@@ -62,6 +64,20 @@ export function specialLocationLabel(loc) {
   const p = parseLoc(v);
   if (p && (p.type === "private" || p.type === "invite" || p.type === "invite+")) return "私人房间";
   return "";
+}
+
+/** 位置行左端「从哪来」的标签（用户 2026-10-17 定）：只认**紧邻的上一个位置**。
+ *  ① 特殊值 / 已有世界名直接用；
+ *  ② 否则若那是一个仅邀请/私人实例（private / invite / invite+）——即使拿不到世界名，
+ *     也必须给「私人房间」，**不许跳过它去显示更早的世界名**（那会变成「上次下线的世界 → 现在」，
+ *     与「刚从一个房间过来」是两回事）。
+ *  抽成纯函数是为了能被 test/location-labels-pure.test.mjs 直接断言（源码正则钉不住行为）。 */
+export function prevLocationLabel(previousLocation, previousWorldName) {
+  const direct = specialLocationLabel(previousLocation) || previousWorldName || '';
+  if (direct) return direct;
+  const p = parseLoc(previousLocation || '');
+  if (p && (p.type === 'private' || p.type === 'invite' || p.type === 'invite+')) return '私人房间';
+  return '';
 }
 
 export function parseLoc(loc) {

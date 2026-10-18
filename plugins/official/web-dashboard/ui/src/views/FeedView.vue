@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { store, setView, openUser, openWorld, openPreview, loadMoreFeed, copyText, openGroup, resetFeed } from '../store.js';
-import { time, date, locLabel, specialLocationLabel, parseLoc, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
+import { time, date, locLabel, specialLocationLabel, prevLocationLabel, parseLoc, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
 import { post } from '../api.js';
 import { toast } from '../toast.js';
 import { statusColor } from '../composables/useFriendGroups.js';
@@ -25,8 +25,11 @@ function sourceLabel(s) {
   return s || '—';
 }
 
-function prevLabelOf(e) { return specialLocationLabel(e.previousLocation) || e.previousWorldName || ''; }
+// 左端「从哪来」：只认紧邻的上一个位置（判据见 utils.prevLocationLabel，有纯函数单测）
+function prevLabelOf(e) { return prevLocationLabel(e.previousLocation, e.previousWorldName); }
 function curIsWorld(e) { return String(e.worldId || '').startsWith('wrld_'); }
+// 目的地是 private/invite 实例且拿不到世界名 ⇒ 界面显示「私人房间」（用户 2026-10-17 定）
+function destPrivate(e) { const p = parseLoc(e.location || ''); return !!(p && (p.type === 'private' || p.type === 'invite' || p.type === 'invite+')); }
 // 左端（上一个位置）的实例信息：公开 · US · 36146（用户 2026-09-24 定「公开房间那侧要显示图像世界名和房间号」）。
 // 与目的地那侧的 inst 口径一致：都走 parseLoc + instanceLabel（不再用 locLabelFull 的整串文案）。
 // 与 locLabelFull 的**有意差异**（2026-10-16 审查 nixi-agent 2，已确认）：
@@ -519,6 +522,7 @@ onUnmounted(() => {
             <span class="dim">进入</span>
             <img v-if="x.worldImageUrl" class="wthumb" :src="x.worldImageUrl" alt="" loading="lazy" />
             <span v-if="x.worldName" class="world-link" @click="openWorld(x.worldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.worldId)">{{ x.worldName }}</span>
+            <span v-else-if="destPrivate(x)" class="dim">私人房间</span>
             <span v-else class="dim">VRChat</span>
           </template>
 
