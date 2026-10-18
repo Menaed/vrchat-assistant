@@ -64,6 +64,9 @@ export function sendHtml(res, html) {
   if (ifNoneMatchHits(inm, tag)) {
     // Vary 必须有：同一 ETag 同时描述 gzip 与 identity 两种表示，缺了它共享缓存（反代/CDN）可能
     // 存下 gzip 表示再对只收 identity 的客户端复验并回 304 ⇒ 把 gzip 字节发给不收 gzip 的客户端。
+    // 304 是**无表示**响应 ⇒ 不得带表示头（Content-Encoding / Content-Length / Content-Type）：
+    // 带了会让中间缓存把它当成「新表示」，甚至按 304 的头覆盖已存表示的元数据。
+    // 故本分支只发 ETag / Cache-Control / Vary 三个（2026-10-18 复审 nixi-agent 记录性建议）。
     res.writeHead(304, { ETag: etagHeader(tag), 'Cache-Control': 'no-cache', 'Vary': 'Accept-Encoding' });
     return res.end();
   }
