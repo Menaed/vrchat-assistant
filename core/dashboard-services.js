@@ -397,8 +397,10 @@ export function registerDashboardServices(loader, ctx) {
           // 精确匹配会漏 ⇒ prev 落在没有 world 对象的那条上 ⇒ 左端「从哪」的世界名/图全空。
           // 用户 2026-10-17 定：左端只显示**紧邻的上一个位置**，不得为了凑名字回退到更早的世界。
           if (!loc || loc.startsWith('traveling')) continue;   // traveling 没有地点，继续往前找
-          // 上一刻离线 ⇒ 没有「从哪」。注意用 break 而不是 return：负结果也要走下面的 prevLocCache.set，
-          // 否则同一页里落在 offline 之后的多条行会各自重复扫一遍历史（2026-10-18 复审 💡2）。
+          // 上一刻离线 ⇒ 没有「从哪」。用 break 而不是 return：负结果与正结果一样走循环后的 prevLocCache.set。
+          // ⚠️ 复审 nixi 💡1 纠正过我的理由：key 是 userId:eventId、且 prevLocationOf 每行只调一次，
+          //    所以 break **并不省扫描次数**（他实测两种变体相同）；这里只为「缓存写入路径统一」，
+          //    不要把「同页多行各重复扫一遍」当理由写进注释。
           if (loc === 'offline' || loc === 'offline:offline') { prev = null; break; }
           const worldId = cj.world?.id || (loc.startsWith('wrld_') ? loc.split(':')[0] : '');
           // 缓存优先（与右端同口径）⇒ 私人房也能显示世界名与缩略图
@@ -406,7 +408,13 @@ export function registerDashboardServices(loader, ctx) {
           const cachedImage = row.wc_image || '';
           // 与右端 COALESCE(NULLIF(wc.name, ''), e.world_name, '') 字面对齐：缓存 -> 事件列 -> 载荷（载荷层为左端独有兜底）
           const worldName = cachedName || row.e_world_name || cj.world?.name || cj.worldName || '';
-          if (!worldName && !worldId) continue;
+          if (!worldName && !worldId) {
+            // 纯值特殊位置（private / local / friends / group…）**就是**紧邻的上一个位置，只是没有世界信息：
+            // 它是「从哪」的答案本身，不能像 traveling 那样跳过 —— 跳过就会回退到更早的世界名，
+            // 与「左端只认紧邻的上一个位置」直接冲突（2026-10-18 复审 nixi ⚠️1；生产里私人房是主导形态）。
+            prev = { location: loc, worldName: '', worldId: '', worldImageUrl: '' };
+            break;
+          }
           prev = {
             location: loc,
             worldName,

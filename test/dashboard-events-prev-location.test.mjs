@@ -108,3 +108,29 @@ test('offline:offline（网页在线）与 offline 同语义 ⇒ 也没有「从
   assert.equal(row.previousLocation, '', 'offline:offline 同样不产生「从哪」');
   assert.equal(row.previousWorldId, '');
 });
+
+// 2026-10-18 复审 nixi ⚠️1 / 💡2：**纯值特殊位置**（private / local / friends / group）也是「紧邻的上一个位置」，
+// 只是没有世界信息 —— 旧实现把它和「取不到名字的畸形行」一起 continue 掉，于是回退到更早的世界名，
+// 与「左端只认紧邻的上一个位置」直接冲突；生产里私人房正是主导形态（报障原文「左端同理」指的就是它）。
+const U4 = 'usr_prev_private';
+const U5 = 'usr_prev_local';
+insLoc(U4, A + ':11111~region(jp)', 6000);
+insLoc(U4, 'private', 7000);
+insLoc(U4, B + ':22222~region(jp)', 8000);
+insLoc(U5, A + ':11111~region(jp)', 6000);
+insLoc(U5, 'local', 7000);
+insLoc(U5, B + ':22222~region(jp)', 8000);
+
+test('上一刻是纯值 private ⇒ 「从哪」就是 private（不得回退到更早的世界）', async () => {
+  const row = await fetchRow(U4, B);
+  assert.ok(row, 'B 行要照常返回');
+  assert.equal(row.previousLocation, 'private', '私人房本身才是「紧邻的上一个位置」');
+  assert.equal(row.previousWorldName, '');
+  assert.equal(row.previousWorldId, '', '纯值没有 worldId，前端因此渲染「私人房间」');
+});
+
+test('上一刻是纯值 local ⇒ 同理得「本地房间」（同一判据，不是给 private 打的补丁）', async () => {
+  const row = await fetchRow(U5, B);
+  assert.ok(row, 'B 行要照常返回');
+  assert.equal(row.previousLocation, 'local');
+});
