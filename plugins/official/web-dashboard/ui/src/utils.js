@@ -61,8 +61,9 @@ export function specialLocationLabel(loc) {
   // 两条判据【并存】：①纯值形态（private / offline / traveling…）由上面的 direct 映射覆盖——
   // 1fdce1f 那天修的就是它，不能删；②带 worldId 的实例串（wrld_xxx:12345~private(usr_xxx)）由下面 parseLoc 覆盖
   // 判据必须走 parseLoc —— 真实位置形如 wrld_xxx:12345~private(usr_xxx)，整串相等永远不命中
-  const p = parseLoc(v);
-  if (p && (p.type === "private" || p.type === "invite" || p.type === "invite+")) return "私人房间";
+  // 且**统一走 isPrivateInstance()**：它只认 private / invite+（parseLoc 从不产出 invite）——
+  // 这里原本内联的那份判据里 'invite' 恒假，属同类死判据（2026-10-18 复审 nixi 💡1 指出，已收敛）
+  if (isPrivateInstance(v)) return "私人房间";
   return "";
 }
 
