@@ -25,10 +25,12 @@ function call(html, headers = {}) {
 
 const tagOf = (r) => r.headers.ETag;
 
-test('无 If-None-Match ⇒ 200 + ETag（ETag 是带引号的强校验器形态）', () => {
+test('无 If-None-Match ⇒ 200 + ETag（**弱**校验器形态 W/"…"）', () => {
   const r = call(SMALL);
   assert.equal(r.status, 200);
-  assert.match(tagOf(r), /^"[0-9a-f]{16}"$/, 'ETag 必须是带引号的字符串（否则不是一个合法校验器）');
+  // 弱校验器：同一个 tag 同时描述 gzip 与 identity 两种字节不同的表示（RFC 9110 §8.8.1；
+  // 按 2026-10-18 复审 nixi-agent 💡1 的建议改成 W/ 形态，配合 Vary: Accept-Encoding）。
+  assert.match(tagOf(r), /^W\/"[0-9a-f]{16}"$/, 'ETag 必须是「W/ + 带引号串」的弱校验器');
   assert.equal(r.headers['Cache-Control'], 'no-cache', '仍要每次复验，不能改成缓存');
   assert.ok(r.body && r.body.length > 0, '首次必须返回正文');
 });
@@ -88,8 +90,10 @@ test('If-None-Match 为 * ⇒ 304（RFC 9110 §13.1.2：GET 语义下「已有�
   assert.equal(call(BIG, { 'if-none-match': '*', 'accept-encoding': 'gzip' }).status, 304);
 });
 
-test('弱校验器（W/ 前缀）也命中：If-None-Match 走弱比较', () => {
+test('弱比较：服务端下发 W/ 形态，客户端回传**不带** W/ 的同一不透明串也命中', () => {
   const first = call(SMALL);
-  assert.equal(call(SMALL, { 'if-none-match': 'W/' + tagOf(first) }).status, 304);
-  assert.equal(call(SMALL, { 'if-none-match': '"deadbeefdeadbeef", W/' + tagOf(first) }).status, 304);
+  const opaque = tagOf(first).replace(/^W\//, '');   // 剥掉 W/ 后的不透明部分
+  assert.equal(call(SMALL, { 'if-none-match': opaque }).status, 304, '强弱形态互通（If-None-Match 是弱比较语义）');
+  assert.equal(call(SMALL, { 'if-none-match': '"deadbeefdeadbeef", ' + opaque }).status, 304, '多值列表里同样命中');
+  assert.equal(call(SMALL, { 'if-none-match': tagOf(first) }).status, 304, '原样回传 W/ 形态当然也命中');
 });

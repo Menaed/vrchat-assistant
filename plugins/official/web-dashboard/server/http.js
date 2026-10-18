@@ -6,9 +6,15 @@ import { createHash } from 'node:crypto';
  *  加 ETag 后浏览器可带 If-None-Match 复验，内容未变直接 304 = 零正文 ✓✓。
  *  **边界（2026-10-18 复审 💡2 指出，如实写清）**：只覆盖「已有缓存且内容未变」这一半 ——
  *  无痕窗口 / 新会话本来就是空缓存，首次仍要下完整包体；首次优化要靠减小包体或流式首屏，不在本函数职责内。 */
+// 返回**不透明**的带引号串；下发时加 W/ 前缀（见 etagHeader）。
+// 理由（复审 nixi-agent 💡1）：同一个 tag 同时描述 gzip 与 identity 两种**字节不同**的表示，
+// 按 RFC 9110 §8.8.1 强校验器要求「同 tag ⇒ 字节相同」⇒ 这里只能是**弱**校验器。
 function etagOf(body) {
   return '"' + createHash('sha1').update(body).digest('hex').slice(0, 16) + '"';
 }
+
+// 下发的 ETag 头：弱校验器。客户端原样回传（W/"…"），比较侧剥掉 W/ 后比不透明部分。
+const etagHeader = (opaque) => 'W/' + opaque;
 
 /** If-None-Match 是否命中当前 ETag：
  *  ① 逗号分隔多值逐个比较（浏览器与中间缓存会带多个）；
@@ -58,7 +64,7 @@ export function sendHtml(res, html) {
   if (ifNoneMatchHits(inm, tag)) {
     // Vary 必须有：同一 ETag 同时描述 gzip 与 identity 两种表示，缺了它共享缓存（反代/CDN）可能
     // 存下 gzip 表示再对只收 identity 的客户端复验并回 304 ⇒ 把 gzip 字节发给不收 gzip 的客户端。
-    res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-cache', 'Vary': 'Accept-Encoding' });
+    res.writeHead(304, { ETag: etagHeader(tag), 'Cache-Control': 'no-cache', 'Vary': 'Accept-Encoding' });
     return res.end();
   }
   if (acceptsGzip(res) && body.length > 1024) {
@@ -66,7 +72,7 @@ export function sendHtml(res, html) {
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache',
-      'ETag': tag,
+      'ETag': etagHeader(tag),
       'Vary': 'Accept-Encoding',
       'Content-Encoding': 'gzip',
       'Content-Length': gz.length,
@@ -76,7 +82,7 @@ export function sendHtml(res, html) {
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-cache',
-    'ETag': tag,
+    'ETag': etagHeader(tag),
     'Vary': 'Accept-Encoding',
     'Content-Length': body.length,
   });
