@@ -564,7 +564,7 @@ export class EventPipeline {
 
         // 信任等级（2026-09-15 用户报障）：此前五类资料变更都跟踪、唯独漏了 trust_level——
         // 且回写也不带 trustLevel → 好友等级变化既无事件、基线也永远不更新（生产实证：
-        // XIAOFANG小芳已升 Trusted User，库内仍停 Known User）。VRChat 的 user 对象
+        // 好友A已升 Trusted User，库内仍停 Known User）。VRChat 的 user 对象
         // 携带 trust_level（LimitedUser 字段），与其它字段同源 diff 即可。
         const trustChanged = prev.trust_level && trust
           && (prev.trust_level || '') !== trust;
