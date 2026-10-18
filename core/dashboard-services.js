@@ -409,9 +409,12 @@ export function registerDashboardServices(loader, ctx) {
           // 与右端 COALESCE(NULLIF(wc.name, ''), e.world_name, '') 字面对齐：缓存 -> 事件列 -> 载荷（载荷层为左端独有兜底）
           const worldName = cachedName || row.e_world_name || cj.world?.name || cj.worldName || '';
           if (!worldName && !worldId) {
-            // 纯值特殊位置（private / local / friends / group…）**就是**紧邻的上一个位置，只是没有世界信息：
-            // 它是「从哪」的答案本身，不能像 traveling 那样跳过 —— 跳过就会回退到更早的世界名，
-            // 与「左端只认紧邻的上一个位置」直接冲突（2026-10-18 复审 nixi ⚠️1；生产里私人房是主导形态）。
+            // 判据是**「任何取不到世界信息的非 traveling/offline 位置」**，不只是已知的那几个纯值：
+            // 除 private / local / friends / group（生产里私人房是主导形态），未知形态（如 mystery / hidden）
+            // 也走这条 —— 它们同样是「紧邻的上一个位置」，跳过就会回退到更早的世界名，
+            // 与「左端只认紧邻的上一个位置」直接冲突（2026-10-18 复审 nixi ⚠️1）。
+            // 已知代价（有意取舍）：未知纯值没有中文标签 ⇒ 前端 prevLocationLabel 为空 ⇒ 左端整块隐藏；
+            // 这比「编造一个更早的世界名」正确，但将来出现新特殊值形态时会静默少一段左端 —— 要支持就补 specialLocationLabel 的映射。
             prev = { location: loc, worldName: '', worldId: '', worldImageUrl: '' };
             break;
           }
