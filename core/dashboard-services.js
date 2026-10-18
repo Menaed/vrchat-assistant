@@ -369,7 +369,9 @@ export function registerDashboardServices(loader, ctx) {
     // 「从哪来」：向前回溯找上一个**真实世界**位置。
     // VRChat 换房前几乎总先推一条 traveling（也是 friend-location 类型），若只取上一条事件，
     // 到达行的 prev 几乎都是 traveling（无 world 对象，名字为空）→「从哪」永远显示不出来（用户反馈）。
-    // 规则：回溯最多 25 条，跳过 traveling/offline 行，取第一条带世界的位置；
+    // 规则：回溯最多 25 条，跳过 traveling/offline 行，**取第一条非 traveling/offline 的位置**（不论有没有世界信息）；
+    //   —— 纯值特殊位置（private / local / …）本身就是「从哪」的答案，不能因为「没有世界」就继续往前找
+    //   （2026-10-18 复审 nixi 指出这里此前仍写着旧语义「取第一条带世界的位置」，与实现不符）。
     // 同世界重进的行（prev==当前世界）由前端 previousWorldName !== worldName 条件自然隐藏。
     // 兼容迁移数据（顶层 worldName）与实时数据（world 对象）两种字段形态。
     const previousLocationOf = (userId, eventId) => {

@@ -134,3 +134,19 @@ test('上一刻是纯值 local ⇒ 同理得「本地房间」（同一判据，
   assert.ok(row, 'B 行要照常返回');
   assert.equal(row.previousLocation, 'local');
 });
+
+// 2026-10-18 复审 nixi 💡2：未知纯值形态的取舍要有用例钉住，否则将来改判据或 prevLocationLabel 会无声漂移。
+// 契约：判据是「任何取不到世界信息的非 traveling/offline 位置」⇒ previousLocation 原样透传；
+// 前端 prevLocationLabel 对它返回空 ⇒ 左端整块隐藏（与「宁可空也不编造更早的世界名」一致）。
+const U6 = 'usr_prev_unknown';
+insLoc(U6, A + ':11111~region(jp)', 6000);
+insLoc(U6, 'mystery:weird', 7000);
+insLoc(U6, B + ':22222~region(jp)', 8000);
+
+test('未知纯值形态（mystery:weird）⇒ 原样透传、不回退；前端无标签则左端整块隐藏', async () => {
+  const row = await fetchRow(U6, B);
+  assert.ok(row, 'B 行要照常返回');
+  assert.equal(row.previousLocation, 'mystery:weird', '未知形态同样算「紧邻的上一个位置」，不能回退到更早的世界');
+  assert.equal(row.previousWorldName, '');
+  assert.equal(row.previousWorldId, '');
+});

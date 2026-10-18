@@ -84,6 +84,11 @@ test('左端：公开实例且无世界名 ⇒ 空（不编造「私人房间」
   assert.equal(prevLocationLabel(undefined, undefined), '');
 });
 
+test('左端：未知纯值形态没有中文标签 ⇒ 返回空（前端据此隐藏整块左端，而不是编造文案）', () => {
+  assert.equal(prevLocationLabel('mystery:weird', ''), '');
+  assert.equal(prevLocationLabel('hidden', ''), '');
+});
+
 // isPrivateInstance：位置行左右两端共用的唯一判据（2026-10-18 复审 💡1 要求删掉恒假的 'invite' 分支）
 test('isPrivateInstance：private 与 invite+ 命中，public / 特殊值 / 空不命中', () => {
   assert.equal(isPrivateInstance(PRIVATE_LOC), true, '~private(usr) 是私人房');
