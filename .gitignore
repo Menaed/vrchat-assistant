@@ -62,6 +62,5 @@ plugins/official/web-dashboard/ui/dist/
 
 # ── Agent 审核协议的本地状态（issue #309）──
 # scan 每跑一次都会改写它（默认路径 scripts/agent-review-state.json），属本机状态；
-# 之前被跟踪 ⇒ 参与方工作树长期带这条例无关 diff，且 git add -A 会把它当改动提交。
+# 之前被跟踪 ⇒ 参与方工作树长期带这条无关 diff，且 git add -A 会把它当改动提交。
 scripts/agent-review-state.json
-
