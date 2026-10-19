@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { store, setView, openUser, openWorld, openPreview, loadMoreFeed, copyText, openGroup, resetFeed } from '../store.js';
-import { time, date, locLabel, specialLocationLabel, parseLoc, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
+import { time, date, locLabel, specialLocationLabel, prevLocationLabel, parseLoc, isPrivateInstance, statusLabels, trustColor, instanceLabel, avatarLabel } from '../utils.js';
 import { post } from '../api.js';
 import { toast } from '../toast.js';
 import { statusColor } from '../composables/useFriendGroups.js';
@@ -25,8 +25,12 @@ function sourceLabel(s) {
   return s || '—';
 }
 
-function prevLabelOf(e) { return specialLocationLabel(e.previousLocation) || e.previousWorldName || ''; }
+// 左端「从哪来」：只认紧邻的上一个位置（判据见 utils.prevLocationLabel，有纯函数单测）
+function prevLabelOf(e) { return prevLocationLabel(e.previousLocation, e.previousWorldName); }
 function curIsWorld(e) { return String(e.worldId || '').startsWith('wrld_'); }
+// 位置行左右两端共用同一私人实例判据（utils.isPrivateInstance；别再各写一份，2026-10-18 复审 💡1）
+function destPrivate(e) { return isPrivateInstance(e.location); }
+function prevPrivate(e) { return isPrivateInstance(e.previousLocation); }
 // 左端（上一个位置）的实例信息：公开 · US · 36146（用户 2026-09-24 定「公开房间那侧要显示图像世界名和房间号」）。
 // 与目的地那侧的 inst 口径一致：都走 parseLoc + instanceLabel（不再用 locLabelFull 的整串文案）。
 // 与 locLabelFull 的**有意差异**（2026-10-16 审查 nixi-agent 2，已确认）：
@@ -457,7 +461,10 @@ onUnmounted(() => {
             <template v-if="prevLabelOf(x) && (curIsWorld(x) ? prevLabelOf(x) !== x.worldName : true)">
               <span class="src-group">
                 <img v-if="x.previousWorldImageUrl" class="wthumb" :src="x.previousWorldImageUrl" alt="" loading="lazy" />
-                <span v-if="x.previousWorldId" class="world-link" @click="openWorld(x.previousWorldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.previousWorldId)">{{ x.previousWorldName }}</span>
+                <!-- 上一刻是仅邀请/私人房间 ⇒ 一律「私人房间」，**即便能拿到世界名**（用户 2026-10-17 定案；
+                     2026-10-18 复审 ⚠️1：此前这条定案只在纯函数里，模板被 x.previousWorldId 分支绕过 ⇒ 实际渲染成世界名） -->
+                <span v-if="prevPrivate(x)" class="dim">私人房间</span>
+                <span v-else-if="x.previousWorldId" class="world-link" @click="openWorld(x.previousWorldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.previousWorldId)">{{ x.previousWorldName }}</span>
                 <span v-else class="dim">{{ prevLabelOf(x) }}</span>
                 <span v-if="prevInstLabel(x)" class="inst mono">{{ prevInstLabel(x) }}</span>
                 <span class="arr">→</span>
@@ -519,6 +526,7 @@ onUnmounted(() => {
             <span class="dim">进入</span>
             <img v-if="x.worldImageUrl" class="wthumb" :src="x.worldImageUrl" alt="" loading="lazy" />
             <span v-if="x.worldName" class="world-link" @click="openWorld(x.worldId)" role="button" tabindex="0" @keydown.enter="openWorld(x.worldId)">{{ x.worldName }}</span>
+            <span v-else-if="destPrivate(x)" class="dim">私人房间</span>
             <span v-else class="dim">VRChat</span>
           </template>
 
