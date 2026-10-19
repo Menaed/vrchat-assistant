@@ -2,12 +2,12 @@
  * test/friend-refresh.test.mjs — 好友资料周期刷新回归（trust_level 自愈 + 变化事件）
  *
  * 背景（2026-09-15 用户报障）：服务纯 WS 驱动 → trust_level 陈旧无自愈
- * （XIAOFANG小芳已升 Trusted User、库内仍停 Known User）。/auth/user/friends 端点
+ * （好友A已升 Trusted User、库内仍停 Known User）。/auth/user/friends 端点
  * 实测硬性只返回 20 个（n/offset 不生效），故采用逐好友 GET /users/{id} 刷新。
  *
  * 断言：①等级变化 → 插入 friend-update trust_level 事件 + 回写新等级（基线更新 →
  *   第二次刷新不再重复报）；②未变化不报；③仅非空字段回写（空值不清空已有）；
- *   ④tags 推导优先（字段滞后/缺失时以 system_trust_* 为准，小芳实测场景）；
+ *   ④tags 推导优先（字段滞后/缺失时以 system_trust_* 为准，好友A 实测场景）；
  *   ⑤API 失败仅记 WARN 不抛、继续处理；⑥每周期上限（MAX_PER_CYCLE）。
  */
 import { test } from 'node:test';
@@ -50,7 +50,7 @@ function makeCtx({ friends, users, failIds = new Set(), profiles = new Map(), pr
 test('等级变化：逐好友 /users/{id} → 事件 + 回写基线（Known → Trusted）', async () => {
   const id = 'usr_xf';
   const { ctx, events, upserts } = makeCtx({
-    friends: [{ user_id: id, display_name: 'XIAOFANG小芳', trust_level: 'Known User' }],
+    friends: [{ user_id: id, display_name: '好友A', trust_level: 'Known User' }],
     users: new Map([[id, userObj(id, { trust: 'Trusted User', tags: ['system_trust_veteran'] })]]),
   });
   await refreshFriendList(ctx, () => {});
@@ -86,7 +86,7 @@ test('未变化：不产生事件', async () => {
 test('tags 推导优先：veteran 徽章 = 现行 Trusted User（VRChat 已移除 Veteran 等级）', async () => {
   const id = 'usr_xf';
   const { ctx, events, upserts } = makeCtx({
-    friends: [{ user_id: id, display_name: 'XIAOFANG小芳', trust_level: 'Known User' }],
+    friends: [{ user_id: id, display_name: '好友A', trust_level: 'Known User' }],
     // trust_level 字段滞后报 Known User；tags 含 trusted + veteran（遗留徽章）→ 应显示 Trusted User
     users: new Map([[id, userObj(id, { trust: 'Known User', tags: ['system_trust_trusted', 'system_trust_veteran'] })]]),
   });

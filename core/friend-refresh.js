@@ -2,11 +2,11 @@
  * core/friend-refresh.js — 好友资料周期刷新（2026-09-15 用户报障根治）
  *
  * 背景：服务纯 WS 驱动、无定期资料拉取。好友 trust_level 等资料字段只在 WS 事件
- * 到达时更新——等级陈旧后无自愈（实测 XIAOFANG小芳已升 Trusted User、库内仍停
+ * 到达时更新——等级陈旧后无自愈（实测 好友A已升 Trusted User、库内仍停
  * Known User）。
  *
  * 方案演进：最初用 GET /auth/user/friends（offline=true）拉列表，实测该端点**硬性
- * 只返回 20 个**（n/offset 均不生效，offset=20 后为空）——20 个之外的好友（如小芳，
+ * 只返回 20 个**（n/offset 均不生效，offset=20 后为空）——20 个之外的好友（如好友A，
  * isFriend=true 却不在列表）永远刷不到。故改为**逐好友 GET /users/{id}**（与既有
  * _refreshTrackedNonFriends 同款先例）：返回完整 User 对象（含 tags），按
  * last_seen DESC 处理、每周期上限 VRC_MONITOR_FRIEND_REFRESH_MAX（默认 50）。
@@ -17,7 +17,7 @@
 // 现行信任等级（VRChat Wiki 官方，2026-09-15 核实）：Visitor → New User → User →
 // Known User → Trusted User（Trusted 最高）。Veteran/Legend 是**已移除的旧等级**
 // （system_trust_veteran/legend 为老玩家遗留徽章，VRChat 移除时各档上移一级），
-// 持有者按最高**现行**等级显示 = Trusted User（用户实测纠正：小芳 tags 含 trusted+veteran，
+// 持有者按最高**现行**等级显示 = Trusted User（用户实测纠正：好友A 的 tags 含 trusted+veteran，
 // 游戏里只显示 Trusted，没有 Veteran 这个等级）。
 // VRChat tag 语义反直觉（务必与本仓既有口径一致，见 plugins/official/web-dashboard/ui/src/utils.js:165
 // 的注释与 start-monitor.js 的 inferTrustFromTags）：**trusted = Known User、known = User**、
